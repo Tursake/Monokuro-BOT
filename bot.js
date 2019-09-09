@@ -10,6 +10,8 @@ const token = fs.readFileSync('token.txt', 'utf8', function(err, data) {
 		console.log(data);
 		return data;
 	});
+	
+var operationRunning = false;
 
 //HTML scraping
 const rp = require('request-promise');
@@ -17,15 +19,11 @@ const cheerio = require('cheerio');
 const imgdownloader = require('image-downloader');
 const imgresize = require('sharp');
 
-var currentGame;
-var currentImgUrl;
-var nextGame;
-var nextImgUrl;
-var imgDir = __dirname + "/img/";
-var imgPath = ["",""];
-var imgPathFull = ["",""];
-var imgPath1Full = "";
-var imgPath2Full = "";
+var gameUrls = ["",""];				// Indexes for games
+var gameTitles = ["",""];			// 0 = current game on offer
+var imgPath = ["",""];				// 1 = upcoming offer
+
+var imgDir = __dirname + "\\img\\";
 var switchMoment = "";
 var switchDate = "";
 
@@ -41,19 +39,17 @@ const urlOptions = {
 
 async function getInfo(msg){
 	
+	console.log("running");
+	
 	const parsedBody = await rp(urlOptions);
 	
 	console.log(imgPath[0]);
 	console.log(imgPath[1]);
 	
-	currentGame = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[0].title);
-	nextGame = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[1].title);
-	currentImgUrl = getUrlFromJSON(0, parsedBody);
-	//currentImgUrl = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[0].keyImages[3].url);
-	//currentImgUrl = currentImgUrl.substring(1,currentImgUrl.length -1);
-	nextImgUrl = getUrlFromJSON(1, parsedBody);
-	//nextImgUrl = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[1].keyImages[0].url);
-	//nextImgUrl = nextImgUrl.substring(1,nextImgUrl.length -1);
+	gameTitles[0] = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[0].title);
+	gameTitles[1] = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[1].title);
+	gameUrls[0] = getUrlFromJSON(0, parsedBody);
+	gameUrls[1] = getUrlFromJSON(1, parsedBody);
 	
 	switchDate = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[1].
 				promotions.upcomingPromotionalOffers[0].promotionalOffers[0].startDate);
@@ -61,61 +57,62 @@ async function getInfo(msg){
 	switchMoment = moment(switchDate).fromNow();
 		
 	const imgOptions1 = {
-		url: currentImgUrl,
+		url: gameUrls[0],
 		dest: imgDir
 	};
 
 	const imgOptions2 = {
-		url: nextImgUrl,
+		url: gameUrls[1],
 		dest: imgDir
 	};
 
-	if(currentImgUrl.substring(currentImgUrl.lastIndexOf("/") +1) != imgPath[0]){
-		console.log("Downloading/replacing Current Image");
-		
-		removeImage(imgPathFull[0]);
-		imgPath[0] = "";
-		imgPathFull[0] = "";
-		
-		filenameObj = await imgdownloader.image(imgOptions1);
-		filename = filenameObj.filename;
-		
-		console.log('Saved to', filename)
-				imgPathFull[0] = filename;
-				imgPath[0] = filename.substring(filename.lastIndexOf("\\") +1);
-				resizeImage(imgPathFull[0]);
-				
-	} else {
-		console.log("Correct Current Image exists already!");
-	}
-  
-	if(nextImgUrl.substring(nextImgUrl.lastIndexOf("/") +1) != imgPath[1]){
-		console.log("Downloading/replacing Next Image");
-		
-		removeImage(imgPathFull[1]);
-		imgPath[1] = "";
-		imgPathFull[1] = "";
-		
-		filenameObj = await imgdownloader.image(imgOptions2);
-		filename = filenameObj.filename;
-		
-		console.log('Saved to', filename)
-				imgPathFull[1] = filename;
-				imgPath[1] = filename.substring(filename.lastIndexOf("\\") +1);
-				resizeImage(imgPathFull[1]);
-				
-	} else {
-		console.log("Correct Next Image exists already!");
-	}
+	await downloadImage(0, imgOptions1);
+	await downloadImage(1, imgOptions2);
 	
 	var attachment = new Attachment("./img/" + imgPath[0]);
-	msg.channel.send("The current free game on Epic Store is: **" + currentGame + "**", attachment);
-	var attachment = new Attachment("./img/" + imgPath[1]);
-	msg.channel.send("The next free game is: **" + nextGame +
-	"**", attachment);
-	msg.channel.send("The next game will be available **" +
-	switchMoment + "** (" + switchDate.substring(0,switchDate.indexOf("T")) + ")");
+	var attachment2 = new Attachment("./img/" + imgPath[1]);
+	msg.channel.send("The current free game on Epic Store is: **"
+	+ gameTitles[0] + "**", attachment).
+	then(() => msg.channel.send("The next free game is: **" + gameTitles[1]
+	+ "**", attachment2)).
+	then(() => msg.channel.send("The next game will be available **"
+	+ switchMoment + "** (" + switchDate.substring(0,switchDate.indexOf("T")) + ")"))
+	.catch(error => {
+		console.error(error);
+	});
+	
+	var running = false;
+	
+	return running;
 };
+
+async function downloadImage(index, imgOptions){
+	if(gameUrls[index].substring(gameUrls[index].lastIndexOf("/") +1) != imgPath[index]){
+		
+		if(index == 1){
+			console.log("Downloading/replacing image for CURRENT OFFER");
+		} else if (index == 2){
+			console.log("Downloading/replacing image for UPCOMING OFFER");
+		}
+		
+		removeImage(imgDir + imgPath[index]);
+		imgPath[index] = "";
+		
+		filenameObj = await imgdownloader.image(imgOptions);
+		filename = filenameObj.filename;
+		
+		console.log('Saved to', filename);
+		imgPath[index] = filename.substring(filename.lastIndexOf("\\") +1);
+		await resizeImage(imgDir + imgPath[index]);
+				
+	} else {
+		if(index == 1){
+			console.log("Correct image for CURRENT OFFER already exists!");
+		} else if (index == 2){
+			console.log("Correct image for UPCOMING OFFER already exists!");
+		}
+	}
+}
 
 function getUrlFromJSON(index, parsedBody){
 	
@@ -141,8 +138,8 @@ function getUrlFromJSON(index, parsedBody){
 
 function removeImage(filePath){
 	
-	if(filePath != ""){
-		console.log("Deleting image from :" + filePath);
+	if(filePath.substring(filePath.lastIndexOf("\\")+1) != ""){
+		console.log("Deleting image from: " + filePath);
 		
 		try {
 		  fs.unlinkSync(filePath)
@@ -155,14 +152,13 @@ function removeImage(filePath){
 	}
 }
 
-function resizeImage(filePath){
+async function resizeImage(filePath){
 	console.log("Resizing from path: " + filePath);
 	imgresize.cache(false);
 	try{
-		imgresize(filePath).resize(350).toBuffer(function(err, buffer){
-			fs.writeFile(filePath, buffer, function(e){
-				console.log("File resized!");
-			});
+		await imgresize(filePath).resize(350).toBuffer().then(buffer => {
+			fs.writeFileSync(filePath, buffer);
+			console.log("File resized!");
 		});
 	} catch(err){
 		console.error(err);
@@ -176,8 +172,16 @@ bot.on('ready', () =>{
 });
 
 bot.on('message', msg=>{
-	if(msg.content === "!epic"){
-		getInfo(msg);
+	if(msg.content === "!epic"
+	&& msg.author.username != "Monokuro"
+	&& !operationRunning){
+		operationRunning = true;
+		getInfo(msg).then(result => {
+			console.log("DONE");
+			operationRunning = result;
+		})
+	} else if (msg.author.username != "Monokuro"){
+		console.log("ERROR");
 	}
 });
 
