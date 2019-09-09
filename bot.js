@@ -37,9 +37,9 @@ const urlOptions = {
 	json:true
 };
 
-async function getInfo(msg){
+async function getInfo(msg, send){
 	
-	console.log("running");
+	console.log("Task started!");
 	
 	const parsedBody = await rp(urlOptions);
 	
@@ -51,37 +51,36 @@ async function getInfo(msg){
 	gameUrls[0] = getUrlFromJSON(0, parsedBody);
 	gameUrls[1] = getUrlFromJSON(1, parsedBody);
 	
-	switchDate = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[1].
-				promotions.upcomingPromotionalOffers[0].promotionalOffers[0].startDate);
-	switchDate = switchDate.substring(1,switchDate.length -2);
-	switchMoment = moment(switchDate).fromNow();
+	getSwitchDate(parsedBody);
 		
-	const imgOptions1 = {
-		url: gameUrls[0],
-		dest: imgDir
-	};
+	if(send){
+		const imgOptions1 = {
+			url: gameUrls[0],
+			dest: imgDir
+		};
 
-	const imgOptions2 = {
-		url: gameUrls[1],
-		dest: imgDir
-	};
+		const imgOptions2 = {
+			url: gameUrls[1],
+			dest: imgDir
+		};
 
-	await downloadImage(0, imgOptions1);
-	await downloadImage(1, imgOptions2);
-	
-	var attachment = new Attachment("./img/" + imgPath[0]);
-	var attachment2 = new Attachment("./img/" + imgPath[1]);
-	msg.channel.send("The current free game on Epic Store is: **"
-	+ gameTitles[0] + "**", attachment).
-	then(() => msg.channel.send("The next free game is: **" + gameTitles[1]
-	+ "**", attachment2)).
-	then(() => msg.channel.send("The next game will be available **"
-	+ switchMoment + "** (" + switchDate.substring(0,switchDate.indexOf("T")) + ")"))
-	.catch(error => {
-		console.error(error);
-	});
-	
-	var running = false;
+		await downloadImage(0, imgOptions1);
+		await downloadImage(1, imgOptions2);
+		
+		var attachment = new Attachment("./img/" + imgPath[0]);
+		var attachment2 = new Attachment("./img/" + imgPath[1]);
+		msg.channel.send("The current free game on Epic Store is: **"
+		+ gameTitles[0] + "**", attachment).
+		then(() => msg.channel.send("The next free game is: **" + gameTitles[1]
+		+ "**", attachment2)).
+		then(() => msg.channel.send("The next game will be available **"
+		+ switchMoment + "** (" + switchDate.substring(0,switchDate.indexOf("T")) + ")"))
+		.catch(error => {
+			console.error(error);
+		});
+		
+		var running = false;
+	}
 	
 	return running;
 };
@@ -165,24 +164,44 @@ async function resizeImage(filePath){
 	}
 }
 
-//getInfo();
+function getSwitchDate(parsedBody){
+	switchDate = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[1].
+				promotions.upcomingPromotionalOffers[0].promotionalOffers[0].startDate);
+	switchDate = switchDate.substring(1,switchDate.length -2);
+	switchMoment = moment(switchDate).fromNow();
+}
+
+async function pollDate(){
+	if(switchDate != "" && switchMoment != ""){
+		console.log(moment(switchDate).diff(moment(), 'days', true));
+		if(moment(switchDate).diff(moment(), 'days') < 1){
+			console.log("ALERT");
+		}
+	}
+}
 
 bot.on('ready', () =>{
 	console.log("Bot online!");
 });
 
 bot.on('message', msg=>{
-	if(msg.content === "!epic"
-	&& msg.author.username != "Monokuro"
-	&& !operationRunning){
-		operationRunning = true;
-		getInfo(msg).then(result => {
-			console.log("DONE");
-			operationRunning = result;
-		})
-	} else if (msg.author.username != "Monokuro"){
-		console.log("ERROR");
+	if(msg.author.username != "Monokuro"){
+		if(msg.content === "!epic" && !operationRunning){
+			operationRunning = true;
+			getInfo(msg,1).then(result => {
+				console.log("Task done!");
+				operationRunning = result;
+			})
+		} else {
+			console.log("Task rejected, another one is already running!");
+		}
 	}
 });
 
+/* MAIN BLOCK */
+
 bot.login(token);
+getInfo("",0);
+setInterval(pollDate, 1000);
+
+/* END MAIN BLOCK */
