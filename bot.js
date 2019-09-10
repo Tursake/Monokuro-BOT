@@ -11,7 +11,11 @@ const token = fs.readFileSync('token.txt', 'utf8', function(err, data) {
 		return data;
 	});
 var setChannel = "";
+var setGuild = "";
 var messagesToPin = ["","",""];
+var alerted = false;
+var cooldown = 0;					// 100ms per tick
+var onCooldown = false;
 	
 var operationRunning = false;
 
@@ -53,7 +57,7 @@ async function getInfo(){
 	getSwitchDate(parsedBody);
 }
 
-async function sendInfo(msg){
+async function sendInfo(channel){
 	
 	operationRunning = true;
 	console.log("Task started!");
@@ -78,17 +82,17 @@ async function sendInfo(msg){
 	
 	await unpinMessages(messagesToPin);
 	
-	msg.channel.send("The current free game on Epic Store is: **"
+	channel.send("The current free game on Epic Store is: **"
 	+ gameTitles[0] + "**", attachment)
 	.then(toPin => {
 		messagesToPin[0] = toPin;
 	})
-	.then(() => msg.channel.send("The next free game is: **" + gameTitles[1]
+	.then(() => channel.send("The next free game is: **" + gameTitles[1]
 	+ "**", attachment2))
 	.then(toPin => {
 		messagesToPin[1] = toPin;
 	})
-	.then(() => msg.channel.send("The next game will be available **"
+	.then(() => channel.send("The next game will be available **"
 	+ switchMoment + "** (" + switchDate.substring(0,switchDate.indexOf("T")) + ")"))
 	.then(toPin => {
 		messagesToPin[2] = toPin;
@@ -137,7 +141,7 @@ function clearMessages(guild){
 	for(let current of channels){
 		current.fetchPinnedMessages()
 		.then(messages => {
-			botMessages = messages.filter(msg => msg.author.bot);
+			botMessages = messages.filter(msg => msg.author.name == bot.name);
 			current.bulkDelete(botMessages);
 		});
 	}
@@ -223,11 +227,29 @@ function getSwitchDate(parsedBody){
 	switchMoment = moment(switchDate).fromNow();
 }
 
+function alertUsers(){
+	let currGuild = bot.guilds.find(foundGuild => foundGuild.name === setGuild);
+	let channel = currGuild.channels.find(foundChan => foundChan.name === setChannel);
+	channel.send("ALERT! Game selection will change in" +
+	moment(switchDate).diff(moment(), 'hours') + " hours");
+}
+
 async function pollDate(){
-	if(switchDate != "" && switchMoment != ""){
-		//console.log(moment(switchDate).diff(moment(), 'days', true));
-		if(moment(switchDate).diff(moment(), 'days') < 1){
-			console.log("ALERT");
+	if(switchDate != "" && switchMoment != "" && setChannel != ""){
+		
+		if(onCooldown){
+			cooldown--;
+			if(cooldown <= 0){
+				onCooldown = false;
+				console.log("Cooldown finished");
+			}
+		}
+		
+		if(moment(switchDate).diff(moment(), 'hours') < 24 && !alerted){
+			alertUsers();
+			alerted = true;
+		} else if (moment(switchDate).diff(moment(), 'days') < 0 && alerted){
+			alerted = false;
 		}
 	}
 }
@@ -242,17 +264,27 @@ bot.on('message', msg=>{
 	
 	if(msg.author.username != "Monokuro"){
 		if(msg.content === "!epic" && !operationRunning && msg.channel.name === setChannel){		// Used to manually fetch current and upcoming offers
-			sendInfo(msg).then(result => {
-				console.log("Task done!");
-				operationRunning = result;
-			})
+			if(onCooldown){
+				msg.react('❌');
+			} else {
+				msg.react('✅');
+				sendInfo(msg.channel).then(result => {
+					console.log("Task done!");
+					operationRunning = result;
+					cooldown = 100;
+					onCooldown = true;
+				})
+			}
 		} else if (msg.content === "!set" && isAdmin){												// Used to set desired channel for bot
 			setChannel = msg.channel.name;
+			setGuild = msg.guild.name;
 			msg.channel.send("Operating channel set to: " + setChannel + "!");
 			clearMessages(msg.guild.name);
-			sendInfo(msg).then(result => {
+			sendInfo(msg.channel).then(result => {
 				console.log("Task done!");
 				operationRunning = result;
+				cooldown = 100;
+				onCooldown = true;
 			})
 		} else {
 			console.log("Task rejected, another one is already running or operating channel not set by an admin!");
@@ -264,6 +296,6 @@ bot.on('message', msg=>{
 
 bot.login(token);
 getInfo();
-setInterval(pollDate, 1000);
+setInterval(pollDate, 100);
 
 /* END MAIN BLOCK */
