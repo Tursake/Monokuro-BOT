@@ -10,6 +10,8 @@ const token = fs.readFileSync('token.txt', 'utf8', function(err, data) {
 		console.log(data);
 		return data;
 	});
+var setChannel = "";
+var messagesToPin = ["","",""];
 	
 var operationRunning = false;
 
@@ -37,10 +39,7 @@ const urlOptions = {
 	json:true
 };
 
-async function getInfo(msg, send){
-	
-	console.log("Task started!");
-	
+async function getInfo(){
 	const parsedBody = await rp(urlOptions);
 	
 	console.log(imgPath[0]);
@@ -52,38 +51,97 @@ async function getInfo(msg, send){
 	gameUrls[1] = getUrlFromJSON(1, parsedBody);
 	
 	getSwitchDate(parsedBody);
-		
-	if(send){
-		const imgOptions1 = {
-			url: gameUrls[0],
-			dest: imgDir
-		};
+}
 
-		const imgOptions2 = {
-			url: gameUrls[1],
-			dest: imgDir
-		};
+async function sendInfo(msg){
+	
+	operationRunning = true;
+	console.log("Task started!");
+	
+	await getInfo();
+		
+	const imgOptions1 = {
+		url: gameUrls[0],
+		dest: imgDir
+	};
 
-		await downloadImage(0, imgOptions1);
-		await downloadImage(1, imgOptions2);
-		
-		var attachment = new Attachment("./img/" + imgPath[0]);
-		var attachment2 = new Attachment("./img/" + imgPath[1]);
-		msg.channel.send("The current free game on Epic Store is: **"
-		+ gameTitles[0] + "**", attachment).
-		then(() => msg.channel.send("The next free game is: **" + gameTitles[1]
-		+ "**", attachment2)).
-		then(() => msg.channel.send("The next game will be available **"
-		+ switchMoment + "** (" + switchDate.substring(0,switchDate.indexOf("T")) + ")"))
-		.catch(error => {
-			console.error(error);
-		});
-		
-		var running = false;
-	}
+	const imgOptions2 = {
+		url: gameUrls[1],
+		dest: imgDir
+	};
+
+	await downloadImage(0, imgOptions1);
+	await downloadImage(1, imgOptions2);
+	
+	var attachment = new Attachment("./img/" + imgPath[0]);
+	var attachment2 = new Attachment("./img/" + imgPath[1]);
+	
+	await unpinMessages(messagesToPin);
+	
+	msg.channel.send("The current free game on Epic Store is: **"
+	+ gameTitles[0] + "**", attachment)
+	.then(toPin => {
+		messagesToPin[0] = toPin;
+	})
+	.then(() => msg.channel.send("The next free game is: **" + gameTitles[1]
+	+ "**", attachment2))
+	.then(toPin => {
+		messagesToPin[1] = toPin;
+	})
+	.then(() => msg.channel.send("The next game will be available **"
+	+ switchMoment + "** (" + switchDate.substring(0,switchDate.indexOf("T")) + ")"))
+	.then(toPin => {
+		messagesToPin[2] = toPin;
+		pinMessages(messagesToPin);
+	})
+	.catch(error => {
+		console.error(error);
+	});
+	
+	var running = false;
 	
 	return running;
 };
+
+function pinMessages(messages){
+	for(var i = messages.length -1; i >= 0; i--){
+		if(messagesToPin[i] != ""){
+			messagesToPin[i].pin();
+		}
+	}
+}
+
+function unpinMessages(messages){
+	for(var i = 0; i < messages.length; i++){
+		if(messagesToPin[i] != ""){
+			messagesToPin[i].unpin();
+		}
+	}
+}
+
+function clearMessages(guild){
+	/*bot.guilds.forEach(guild => {
+		let channels = guild.channels.filter(chan => chan.type == "text").array();
+		for(let current of channels){
+			current.fetchPinnedMessages()
+			.then(messages => {
+				botMessages = messages.filter(msg => msg.author.bot);
+				current.bulkDelete(botMessages);
+				console.log("Deleted " + botMessages.length + " messages");
+			});
+		}
+	});*/
+	
+	let currGuild = bot.guilds.find(foundGuild => foundGuild.name === guild);
+	let channels = currGuild.channels.filter(chan => chan.type == "text").array();
+	for(let current of channels){
+		current.fetchPinnedMessages()
+		.then(messages => {
+			botMessages = messages.filter(msg => msg.author.bot);
+			current.bulkDelete(botMessages);
+		});
+	}
+}
 
 async function downloadImage(index, imgOptions){
 	if(gameUrls[index].substring(gameUrls[index].lastIndexOf("/") +1) != imgPath[index]){
@@ -122,12 +180,6 @@ function getUrlFromJSON(index, parsedBody){
 	var keys = Object.keys(obj);
 	for (var i = 0; i < keys.length; i++) {
 		var item = obj[keys[i]];
-		
-		/*if(item.url != ""){
-			console.log(item.url);
-			urlFound = item.url;
-			break;
-		}*/
 		
 		urlFound = item.url;
 	}
@@ -173,7 +225,7 @@ function getSwitchDate(parsedBody){
 
 async function pollDate(){
 	if(switchDate != "" && switchMoment != ""){
-		console.log(moment(switchDate).diff(moment(), 'days', true));
+		//console.log(moment(switchDate).diff(moment(), 'days', true));
 		if(moment(switchDate).diff(moment(), 'days') < 1){
 			console.log("ALERT");
 		}
@@ -185,15 +237,25 @@ bot.on('ready', () =>{
 });
 
 bot.on('message', msg=>{
+	
+	let isAdmin = msg.channel.permissionsFor(msg.member).has("ADMINISTRATOR", true);
+	
 	if(msg.author.username != "Monokuro"){
-		if(msg.content === "!epic" && !operationRunning){
-			operationRunning = true;
-			getInfo(msg,1).then(result => {
+		if(msg.content === "!epic" && !operationRunning && msg.channel.name === setChannel){		// Used to manually fetch current and upcoming offers
+			sendInfo(msg).then(result => {
+				console.log("Task done!");
+				operationRunning = result;
+			})
+		} else if (msg.content === "!set" && isAdmin){												// Used to set desired channel for bot
+			setChannel = msg.channel.name;
+			msg.channel.send("Operating channel set to: " + setChannel + "!");
+			clearMessages(msg.guild.name);
+			sendInfo(msg).then(result => {
 				console.log("Task done!");
 				operationRunning = result;
 			})
 		} else {
-			console.log("Task rejected, another one is already running!");
+			console.log("Task rejected, another one is already running or operating channel not set by an admin!");
 		}
 	}
 });
@@ -201,7 +263,7 @@ bot.on('message', msg=>{
 /* MAIN BLOCK */
 
 bot.login(token);
-getInfo("",0);
+getInfo();
 setInterval(pollDate, 1000);
 
 /* END MAIN BLOCK */
