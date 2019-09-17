@@ -13,6 +13,8 @@ const token = fs.readFileSync('token.txt', 'utf8', function(err, data) {
 	
 var lastMoment;
 var alertHours = 84;
+var cooldownTime = 600;				// 100ms per tick
+var clearTime = 60;					// 100ms per tick
 
 //Guild specifics
 var guilds = {};
@@ -30,7 +32,7 @@ function guildsSetup(){
 			guilds[curr].alerted = false;
 			guilds[curr].systemMessageClearTimer = 0;
 			guilds[curr].clearSystemMessages = false;
-			guilds[curr].cooldown = 0;					// 100ms per tick
+			guilds[curr].cooldown = 0;
 			guilds[curr].onCooldown = false;
 			guilds[curr].operationRunning = false;
 			console.log(" -> Found server " + guilds[curr].setGuild);
@@ -65,9 +67,6 @@ const urlOptions = {
 async function getInfo(){
 	try{
 		const parsedBody = await rp(urlOptions);
-	
-		console.log(imgPath[0]);
-		console.log(imgPath[1]);
 		
 		gameTitles[0] = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[0].title);
 		gameTitles[1] = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[1].title);
@@ -82,9 +81,12 @@ async function getInfo(){
 
 async function sendInfo(ID, channel){
 	
+	/*let processID = process.hrtime();
+	processID = Math.trunc((processID[0] + processID[1])/10000);*/
+	
 	if(!guilds[ID].operationRunning){
 		guilds[ID].operationRunning = true;
-		console.log("Task started!");
+		console.log("Task started for server: " + guilds[ID].setGuild + " - #" + guilds[ID].setChannel);
 		
 		await getInfo();
 			
@@ -174,9 +176,9 @@ async function downloadImage(index, imgOptions){
 	if(gameUrls[index].substring(gameUrls[index].lastIndexOf("/") +1) != imgPath[index]){
 		
 		if(index == 0){
-			console.log("Downloading/replacing image for CURRENT OFFER");
+			console.log(" -> Downloading/replacing image for CURRENT OFFER");
 		} else if (index == 1){
-			console.log("Downloading/replacing image for UPCOMING OFFER");
+			console.log(" -> Downloading/replacing image for UPCOMING OFFER");
 		}
 		
 		removeImage(imgDir + imgPath[index]);
@@ -185,15 +187,15 @@ async function downloadImage(index, imgOptions){
 		filenameObj = await imgdownloader.image(imgOptions);
 		filename = filenameObj.filename;
 		
-		console.log('  -> Saved to', filename);
+		console.log('   -> Saved to', filename);
 		imgPath[index] = filename.substring(filename.lastIndexOf("\\") +1);
 		await resizeImage(imgDir + imgPath[index]);
 				
 	} else {
-		if(index == 1){
-			console.log("Correct image for CURRENT OFFER already exists!");
-		} else if (index == 2){
-			console.log("Correct image for UPCOMING OFFER already exists!");
+		if(index == 0){
+			console.log(" -> Correct image for CURRENT OFFER already exists!");
+		} else if (index == 1){
+			console.log(" -> Correct image for UPCOMING OFFER already exists!");
 		}
 	}
 }
@@ -217,26 +219,26 @@ function getUrlFromJSON(index, parsedBody){
 function removeImage(filePath){
 	
 	if(filePath.substring(filePath.lastIndexOf("\\")+1) != ""){
-		console.log(" -> Deleting image from: " + filePath);
+		console.log("  -> Deleting image from: " + filePath);
 		
 		try {
 		  fs.unlinkSync(filePath)
-		  console.log("Deletion success!");
+		  console.log("   -> Deletion success!");
 		} catch(err) {
 		  console.error(err)
 		}
 	} else {
-		console.log(" -> Couldn't find image. If first time running script, ignore!");
+		console.log("  -> Couldn't find image. If first time running script, ignore!");
 	}
 }
 
 async function resizeImage(filePath){
-	console.log("   -> Resizing from path: " + filePath);
+	console.log("    -> Resizing from path: " + filePath);
 	imgresize.cache(false);
 	try{
 		await imgresize(filePath).resize(350).toBuffer().then(buffer => {
 			fs.writeFileSync(filePath, buffer);
-			console.log("    -> File resized!");
+			console.log("     -> File resized!");
 		});
 	} catch(err){
 		console.error(err);
@@ -288,7 +290,7 @@ async function pollDate(){
 				guilds[Object.keys(guilds)[i]].cooldown--;
 				if(guilds[Object.keys(guilds)[i]].cooldown <= 0){
 					guilds[Object.keys(guilds)[i]].onCooldown = false;
-					console.log("Cooldown finished for server " + guilds[Object.keys(guilds)[i]].setGuild);
+					console.log("Cooldown finished for server: " + guilds[Object.keys(guilds)[i]].setGuild + " - #" + guilds[Object.keys(guilds)[i]].setChannel);
 				}
 			}
 			
@@ -310,8 +312,8 @@ async function pollDate(){
 					sendInfo(guilds[Object.keys(guilds)[i]].setID,channel).then(result => {
 						console.log("Task done!");
 						guilds[Object.keys(guilds)[i]].operationRunning = result;
-						guilds[Object.keys(guilds)[i]].cooldown = 100;
-						guilds[Object.keys(guilds)[i]].systemMessageClearTimer = 40;
+						guilds[Object.keys(guilds)[i]].cooldown = cooldownTime;
+						guilds[Object.keys(guilds)[i]].systemMessageClearTimer = clearTime;
 						guilds[Object.keys(guilds)[i]].clearSystemMessages = true;
 						onCooldown = true;
 					})
@@ -344,16 +346,17 @@ bot.on('message', msg=>{
 	let isAdmin = msg.channel.permissionsFor(msg.member).has("ADMINISTRATOR", true);
 	
 	if(msg.author.username != "Monokuro"){
-		if(msg.content === "!epic" && !operationRunning && msg.channel.name === guilds[msg.guild.id].setChannel){		// Used to manually fetch current and upcoming offers
-			if(onCooldown){
+		if(msg.content === "!epic" && !guilds[msg.guild.id].operationRunning && msg.channel.name === guilds[msg.guild.id].setChannel){		// Used to manually fetch current and upcoming offers
+			if(guilds[msg.guild.id].onCooldown){
 				msg.react('❌');
+				console.log("Task rejected, another one is already running on the same server!");
 			} else {
 				msg.react('✅');
 				sendInfo(msg.guild.id,msg.channel).then(result => {
 					console.log("Task done!");
 					guilds[msg.guild.id].operationRunning = result;
-					guilds[msg.guild.id].cooldown = 100;
-					guilds[msg.guild.id].systemMessageClearTimer = 40;
+					guilds[msg.guild.id].cooldown = cooldownTime;
+					guilds[msg.guild.id].systemMessageClearTimer = clearTime;
 					guilds[msg.guild.id].clearSystemMessages = true;
 					guilds[msg.guild.id].onCooldown = true;
 				})
@@ -365,12 +368,13 @@ bot.on('message', msg=>{
 			sendInfo(msg.guild.id,msg.channel).then(result => {
 				console.log("Task done!");
 				guilds[msg.guild.id].operationRunning = result;
-				guilds[msg.guild.id].cooldown = 100;
-				guilds[msg.guild.id].systemMessageClearTimer = 40;
+				guilds[msg.guild.id].cooldown = cooldownTime;
+				guilds[msg.guild.id].systemMessageClearTimer = clearTime;
 				guilds[msg.guild.id].clearSystemMessages = true;
 				guilds[msg.guild.id].onCooldown = true;
 			})
 		} else {
+			msg.react('❌');
 			console.log("Task rejected, another one is already running or operating channel not set by an admin!");
 		}
 	}
