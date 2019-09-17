@@ -167,7 +167,7 @@ function clearMessages(guild){
 		current.fetchPinnedMessages()
 		.then(messages => {
 			botMessages = messages.filter(msg => msg.author.name == bot.name);
-			current.bulkDelete(botMessages);
+			current.bulkDelete(botMessages, true);
 		});
 	}
 }
@@ -278,7 +278,7 @@ function deleteSystemMessages(guildName,channelName){
 	channel.fetchMessages({limit:10})
 	.then(messages => {
 		systemMessages = messages.filter(msg => msg.system);
-		channel.bulkDelete(systemMessages);
+		channel.bulkDelete(systemMessages, true);
 	});
 }
 
@@ -337,8 +337,13 @@ bot.on('ready', () =>{
 });
 
 bot.on('guildCreate', function(guild){
-    console.log("The client joins a guild");
+    console.log("The bot joins a guild");
 	guildsSetup();
+});
+
+bot.on('guildDelete', function(guild){
+	delete guilds[guild.id];
+    console.log("The bot leaves guild: " + guild.name);
 });
 
 bot.on('message', msg=>{
@@ -346,7 +351,8 @@ bot.on('message', msg=>{
 	let isAdmin = msg.channel.permissionsFor(msg.member).has("ADMINISTRATOR", true);
 	
 	if(msg.author.username != "Monokuro"){
-		if(msg.content === "!epic" && !guilds[msg.guild.id].operationRunning && msg.channel.name === guilds[msg.guild.id].setChannel){		// Used to manually fetch current and upcoming offers
+		if(msg.content === "!epic" && !guilds[msg.guild.id].operationRunning
+		&& msg.channel.name === guilds[msg.guild.id].setChannel){											// Used to manually fetch current and upcoming offers
 			if(guilds[msg.guild.id].onCooldown){
 				msg.react('❌');
 				console.log("Task rejected, another one is already running on the same server!");
@@ -361,7 +367,7 @@ bot.on('message', msg=>{
 					guilds[msg.guild.id].onCooldown = true;
 				})
 			}
-		} else if (msg.content === "!set" && isAdmin){												// Used to set desired channel for bot
+		} else if (msg.content === "!set" && isAdmin && guilds[msg.guild.id] != msg.channel.name){			// Used to set desired channel for bot
 			guilds[msg.guild.id].setChannel = msg.channel.name;
 			msg.channel.send("Operating channel set to: **#" + guilds[msg.guild.id].setChannel + "**");
 			clearMessages(msg.guild.name);
@@ -373,7 +379,7 @@ bot.on('message', msg=>{
 				guilds[msg.guild.id].clearSystemMessages = true;
 				guilds[msg.guild.id].onCooldown = true;
 			})
-		} else {
+		} else if(msg.content === "!epic"){
 			msg.react('❌');
 			console.log("Task rejected, another one is already running or operating channel not set by an admin!");
 		}
