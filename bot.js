@@ -10,14 +10,33 @@ const token = fs.readFileSync('token.txt', 'utf8', function(err, data) {
 		console.log(data);
 		return data;
 	});
-var setChannel = "";
-var setGuild = "";
-var messagesToPin = ["","",""];
-var alerted = false;
-var cooldown = 0;					// 100ms per tick
-var onCooldown = false;
 	
-var operationRunning = false;
+var lastMoment;
+var alertHours = 84;
+
+//Guild specifics
+var guilds = {};
+function guildsSetup(){
+	console.log("Parsing bot guild list");
+	
+	bot.guilds.forEach((guild, index) => {
+		if(guilds[guild.id] == null){
+			var curr = guild.id
+			guilds[curr] = {};
+			guilds[curr].setChannel = "";
+			guilds[curr].setGuild = guild.name;
+			guilds[curr].setID = curr;
+			guilds[curr].messagesToPin = ["","",""];
+			guilds[curr].alerted = false;
+			guilds[curr].systemMessageClearTimer = 0;
+			guilds[curr].clearSystemMessages = false;
+			guilds[curr].cooldown = 0;					// 100ms per tick
+			guilds[curr].onCooldown = false;
+			guilds[curr].operationRunning = false;
+			console.log(" -> Found server " + guilds[curr].setGuild);
+		}
+	});
+}
 
 //HTML scraping
 const rp = require('request-promise');
@@ -44,81 +63,85 @@ const urlOptions = {
 };
 
 async function getInfo(){
-	const parsedBody = await rp(urlOptions);
+	try{
+		const parsedBody = await rp(urlOptions);
 	
-	console.log(imgPath[0]);
-	console.log(imgPath[1]);
-	
-	gameTitles[0] = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[0].title);
-	gameTitles[1] = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[1].title);
-	gameUrls[0] = getUrlFromJSON(0, parsedBody);
-	gameUrls[1] = getUrlFromJSON(1, parsedBody);
-	
-	getSwitchDate(parsedBody);
+		console.log(imgPath[0]);
+		console.log(imgPath[1]);
+		
+		gameTitles[0] = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[0].title);
+		gameTitles[1] = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[1].title);
+		gameUrls[0] = getUrlFromJSON(0, parsedBody);
+		gameUrls[1] = getUrlFromJSON(1, parsedBody);
+		
+		getSwitchDate(parsedBody);
+	}catch(err) {
+		console.error(err);
+	}
 }
 
-async function sendInfo(channel){
+async function sendInfo(ID, channel){
 	
-	operationRunning = true;
-	console.log("Task started!");
-	
-	await getInfo();
+	if(!guilds[ID].operationRunning){
+		guilds[ID].operationRunning = true;
+		console.log("Task started!");
 		
-	const imgOptions1 = {
-		url: gameUrls[0],
-		dest: imgDir
-	};
+		await getInfo();
+			
+		const imgOptions1 = {
+			url: gameUrls[0],
+			dest: imgDir
+		};
 
-	const imgOptions2 = {
-		url: gameUrls[1],
-		dest: imgDir
-	};
+		const imgOptions2 = {
+			url: gameUrls[1],
+			dest: imgDir
+		};
 
-	await downloadImage(0, imgOptions1);
-	await downloadImage(1, imgOptions2);
-	
-	var attachment = new Attachment("./img/" + imgPath[0]);
-	var attachment2 = new Attachment("./img/" + imgPath[1]);
-	
-	await unpinMessages(messagesToPin);
-	
-	channel.send("The current free game on Epic Store is: **"
-	+ gameTitles[0] + "**", attachment)
-	.then(toPin => {
-		messagesToPin[0] = toPin;
-	})
-	.then(() => channel.send("The next free game is: **" + gameTitles[1]
-	+ "**", attachment2))
-	.then(toPin => {
-		messagesToPin[1] = toPin;
-	})
-	.then(() => channel.send("The next game will be available **"
-	+ switchMoment + "** (" + switchDate.substring(0,switchDate.indexOf("T")) + ")"))
-	.then(toPin => {
-		messagesToPin[2] = toPin;
-		pinMessages(messagesToPin);
-	})
-	.catch(error => {
-		console.error(error);
-	});
-	
-	var running = false;
-	
-	return running;
+		await downloadImage(0, imgOptions1);
+		await downloadImage(1, imgOptions2);
+		
+		var attachment = new Attachment("./img/" + imgPath[0]);
+		var attachment2 = new Attachment("./img/" + imgPath[1]);
+		
+		await unpinMessages(guilds[ID].messagesToPin);
+		
+		channel.send("The current free game on Epic Store is: **"
+		+ gameTitles[0] + "**", attachment)
+		.then(toPin => {
+			guilds[ID].messagesToPin[0] = toPin;
+		})
+		.then(() => channel.send("The next free game is: **" + gameTitles[1]
+		+ "**", attachment2))
+		.then(toPin => {
+			guilds[ID].messagesToPin[1] = toPin;
+		})
+		.then(() => channel.send("The next game will be available **"
+		+ switchMoment + "** (" + switchDate.substring(0,switchDate.indexOf("T")) + ")"))
+		.then(toPin => {
+			guilds[ID].messagesToPin[2] = toPin;
+			pinMessages(guilds[ID].messagesToPin);
+		})
+		.catch(error => {
+			console.error(error);
+		});
+		
+		return false;
+	}
 };
 
 function pinMessages(messages){
 	for(var i = messages.length -1; i >= 0; i--){
-		if(messagesToPin[i] != ""){
-			messagesToPin[i].pin();
+		if(messages[i] != ""){
+			messages[i].pin();
 		}
 	}
 }
 
 function unpinMessages(messages){
 	for(var i = 0; i < messages.length; i++){
-		if(messagesToPin[i] != ""){
-			messagesToPin[i].unpin();
+		if(messages[i] != ""){
+			messages[i].unpin();
 		}
 	}
 }
@@ -150,9 +173,9 @@ function clearMessages(guild){
 async function downloadImage(index, imgOptions){
 	if(gameUrls[index].substring(gameUrls[index].lastIndexOf("/") +1) != imgPath[index]){
 		
-		if(index == 1){
+		if(index == 0){
 			console.log("Downloading/replacing image for CURRENT OFFER");
-		} else if (index == 2){
+		} else if (index == 1){
 			console.log("Downloading/replacing image for UPCOMING OFFER");
 		}
 		
@@ -162,7 +185,7 @@ async function downloadImage(index, imgOptions){
 		filenameObj = await imgdownloader.image(imgOptions);
 		filename = filenameObj.filename;
 		
-		console.log('Saved to', filename);
+		console.log('  -> Saved to', filename);
 		imgPath[index] = filename.substring(filename.lastIndexOf("\\") +1);
 		await resizeImage(imgDir + imgPath[index]);
 				
@@ -194,7 +217,7 @@ function getUrlFromJSON(index, parsedBody){
 function removeImage(filePath){
 	
 	if(filePath.substring(filePath.lastIndexOf("\\")+1) != ""){
-		console.log("Deleting image from: " + filePath);
+		console.log(" -> Deleting image from: " + filePath);
 		
 		try {
 		  fs.unlinkSync(filePath)
@@ -203,17 +226,17 @@ function removeImage(filePath){
 		  console.error(err)
 		}
 	} else {
-		console.log("Couldn't find image. If first time running script, ignore!");
+		console.log(" -> Couldn't find image. If first time running script, ignore!");
 	}
 }
 
 async function resizeImage(filePath){
-	console.log("Resizing from path: " + filePath);
+	console.log("   -> Resizing from path: " + filePath);
 	imgresize.cache(false);
 	try{
 		await imgresize(filePath).resize(350).toBuffer().then(buffer => {
 			fs.writeFileSync(filePath, buffer);
-			console.log("File resized!");
+			console.log("    -> File resized!");
 		});
 	} catch(err){
 		console.error(err);
@@ -228,34 +251,92 @@ function getSwitchDate(parsedBody){
 }
 
 function alertUsers(){
-	let currGuild = bot.guilds.find(foundGuild => foundGuild.name === setGuild);
-	let channel = currGuild.channels.find(foundChan => foundChan.name === setChannel);
-	channel.send("ALERT! Game selection will change in" +
-	moment(switchDate).diff(moment(), 'hours') + " hours");
+	for(var i = 0; i < Object.keys(guilds).length; i++){
+		if(guilds[Object.keys(guilds)[i]].alert == false && guilds[Object.keys(guilds)[i]].setChannel != ""){
+			let currGuild = bot.guilds.find(foundGuild => foundGuild.name === guilds[Object.keys(guilds)[i]].setGuild);
+			let channel = currGuild.channels.find(foundChan => foundChan.name === guilds[Object.keys(guilds)[i]].setChannel);
+			channel.send("ALERT! Game selection will change in" +
+			moment(switchDate).diff(moment(), 'hours') + " hours");
+		}
+	}
+}
+
+function resetAlerts(){
+	for(var i = 0; i < Object.keys(guilds).length; i++){
+		guilds[Object.keys(guilds)[i]].alert = false;
+	}
+}
+
+function deleteSystemMessages(guildName,channelName){
+	console.log("Deleting pin messages from server: " + guildName + " - #" + channelName);
+	
+	let currGuild = bot.guilds.find(foundGuild => foundGuild.name === guildName);
+	let channel = currGuild.channels.find(foundChan => foundChan.name === channelName);
+	
+	channel.fetchMessages({limit:10})
+	.then(messages => {
+		systemMessages = messages.filter(msg => msg.system);
+		channel.bulkDelete(systemMessages);
+	});
 }
 
 async function pollDate(){
-	if(switchDate != "" && switchMoment != "" && setChannel != ""){
+	if(switchDate != "" && switchMoment != ""){
 		
-		if(onCooldown){
-			cooldown--;
-			if(cooldown <= 0){
-				onCooldown = false;
-				console.log("Cooldown finished");
+		for(var i = 0; i < Object.keys(guilds).length; i++){
+			if(guilds[Object.keys(guilds)[i]].onCooldown){
+				guilds[Object.keys(guilds)[i]].cooldown--;
+				if(guilds[Object.keys(guilds)[i]].cooldown <= 0){
+					guilds[Object.keys(guilds)[i]].onCooldown = false;
+					console.log("Cooldown finished for server " + guilds[Object.keys(guilds)[i]].setGuild);
+				}
 			}
+			
+			if(guilds[Object.keys(guilds)[i]].clearSystemMessages){
+				guilds[Object.keys(guilds)[i]].systemMessageClearTimer--;
+				if(guilds[Object.keys(guilds)[i]].systemMessageClearTimer <= 0){
+					guilds[Object.keys(guilds)[i]].clearSystemMessages = false;
+					if(guilds[Object.keys(guilds)[i]].setChannel != ""){
+						deleteSystemMessages(guilds[Object.keys(guilds)[i]].setGuild,guilds[Object.keys(guilds)[i]].setChannel);
+					}
+				}
+			}
+			
+			if(lastMoment != null){
+				if(moment().dayOfYear() > lastMoment || (moment().dayOfYear() == 1 && lastMoment == 365)){
+					console.log("Date changed, updating info");
+					let currGuild = bot.guilds.find(foundGuild => foundGuild.name === guilds[Object.keys(guilds)[i]].setGuild);
+					let channel = currGuild.channels.find(foundChan => foundChan.name === guilds[Object.keys(guilds)[i]].setChannel);
+					sendInfo(guilds[Object.keys(guilds)[i]].setID,channel).then(result => {
+						console.log("Task done!");
+						guilds[Object.keys(guilds)[i]].operationRunning = result;
+						guilds[Object.keys(guilds)[i]].cooldown = 100;
+						guilds[Object.keys(guilds)[i]].systemMessageClearTimer = 40;
+						guilds[Object.keys(guilds)[i]].clearSystemMessages = true;
+						onCooldown = true;
+					})
+				}
+			}
+			
+			lastMoment = moment().dayOfYear();
 		}
 		
-		if(moment(switchDate).diff(moment(), 'hours') < 24 && !alerted){
+		if(moment(switchDate).diff(moment(), 'hours') < alertHours){
 			alertUsers();
-			alerted = true;
-		} else if (moment(switchDate).diff(moment(), 'days') < 0 && alerted){
-			alerted = false;
+		}  else if (moment(switchDate).diff(moment(), 'days') < 0){
+			resetAlerts();
 		}
 	}
 }
 
 bot.on('ready', () =>{
 	console.log("Bot online!");
+	guildsSetup();
+});
+
+bot.on('guildCreate', function(guild){
+    console.log("The client joins a guild");
+	guildsSetup();
 });
 
 bot.on('message', msg=>{
@@ -263,28 +344,31 @@ bot.on('message', msg=>{
 	let isAdmin = msg.channel.permissionsFor(msg.member).has("ADMINISTRATOR", true);
 	
 	if(msg.author.username != "Monokuro"){
-		if(msg.content === "!epic" && !operationRunning && msg.channel.name === setChannel){		// Used to manually fetch current and upcoming offers
+		if(msg.content === "!epic" && !operationRunning && msg.channel.name === guilds[msg.guild.id].setChannel){		// Used to manually fetch current and upcoming offers
 			if(onCooldown){
 				msg.react('❌');
 			} else {
 				msg.react('✅');
-				sendInfo(msg.channel).then(result => {
+				sendInfo(msg.guild.id,msg.channel).then(result => {
 					console.log("Task done!");
-					operationRunning = result;
-					cooldown = 100;
-					onCooldown = true;
+					guilds[msg.guild.id].operationRunning = result;
+					guilds[msg.guild.id].cooldown = 100;
+					guilds[msg.guild.id].systemMessageClearTimer = 40;
+					guilds[msg.guild.id].clearSystemMessages = true;
+					guilds[msg.guild.id].onCooldown = true;
 				})
 			}
 		} else if (msg.content === "!set" && isAdmin){												// Used to set desired channel for bot
-			setChannel = msg.channel.name;
-			setGuild = msg.guild.name;
-			msg.channel.send("Operating channel set to: " + setChannel + "!");
+			guilds[msg.guild.id].setChannel = msg.channel.name;
+			msg.channel.send("Operating channel set to: **#" + guilds[msg.guild.id].setChannel + "**");
 			clearMessages(msg.guild.name);
-			sendInfo(msg.channel).then(result => {
+			sendInfo(msg.guild.id,msg.channel).then(result => {
 				console.log("Task done!");
-				operationRunning = result;
-				cooldown = 100;
-				onCooldown = true;
+				guilds[msg.guild.id].operationRunning = result;
+				guilds[msg.guild.id].cooldown = 100;
+				guilds[msg.guild.id].systemMessageClearTimer = 40;
+				guilds[msg.guild.id].clearSystemMessages = true;
+				guilds[msg.guild.id].onCooldown = true;
 			})
 		} else {
 			console.log("Task rejected, another one is already running or operating channel not set by an admin!");
