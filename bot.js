@@ -70,6 +70,10 @@ async function getInfo(){
 	try{
 		const parsedBody = await rp(urlOptions);
 		
+		if(JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[0].title) != gameTitles[0]){
+			clearImageFolder();
+		}
+		
 		gameTitles[0] = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[0].title);
 		gameTitles[1] = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[1].title);
 		gameUrls[0] = getUrlFromJSON(0, parsedBody);
@@ -82,7 +86,6 @@ async function getInfo(){
 }
 
 async function sendInfo(ID, channel){
-	
 	/*let processID = process.hrtime();
 	processID = Math.trunc((processID[0] + processID[1])/10000);*/
 	
@@ -183,8 +186,8 @@ async function downloadImage(index, imgOptions){
 			console.log(" -> Downloading/replacing image for UPCOMING OFFER");
 		}
 		
-		removeImage(imgDir + imgPath[index]);
-		imgPath[index] = "";
+		/*removeImage(imgDir + imgPath[index]);
+		imgPath[index] = "";*/
 		
 		filenameObj = await imgdownloader.image(imgOptions);
 		filename = filenameObj.filename;
@@ -203,7 +206,6 @@ async function downloadImage(index, imgOptions){
 }
 
 function getUrlFromJSON(index, parsedBody){
-	
 	var urlFound = "";
 	var parsed = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[index].keyImages);
 	
@@ -218,10 +220,9 @@ function getUrlFromJSON(index, parsedBody){
 	return urlFound;
 }
 
-function removeImage(filePath){
-	
-	if(filePath.substring(filePath.lastIndexOf("\\")+1) != ""){
-		console.log("  -> Deleting image from: " + filePath);
+function clearImageFolder(filePath){
+	/*if(filePath.substring(filePath.lastIndexOf("\\")+1) != ""){
+		console.log(" -> Clearing existing images from: " + filePath);
 		
 		try {
 		  fs.unlinkSync(filePath)
@@ -230,8 +231,32 @@ function removeImage(filePath){
 		  console.error(err)
 		}
 	} else {
-		console.log("  -> Couldn't find image. If first time running script, ignore!");
-	}
+		console.log(" -> Couldn't find image. If first time running script, ignore!");
+	}*/
+	
+	console.log("Clearing image folder");
+	
+	fs.readdir(imgDir,(err,files) => {
+		if(err) throw err;
+		
+		let count = 0;
+		
+		for (let file of files){
+			if(file != ".gitkeep"){
+				let path = imgDir + file;
+				fs.unlink(path, err => {
+					if(err) throw err;
+				});
+				count++;
+			}
+		}
+		
+		if(count > 0){
+		console.log(" -> Deleted (" + count + ") files");
+		} else {
+		console.log(" -> Folder was already empty");
+		}
+	});
 }
 
 async function resizeImage(filePath){
