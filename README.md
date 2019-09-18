@@ -11,4 +11,4 @@ Automatically alerts specified channel 24 hours before the offerings change. Pin
 
 **How to use**:
 
-Add a `token.txt` to the folder and paste your bot token into it.
+Add a `token.json` to the folder and paste your bot token into it in JSON format.
