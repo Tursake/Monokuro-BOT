@@ -108,8 +108,13 @@ async function sendInfo(ID, channel){
 		await downloadImage(0, imgOptions1);
 		await downloadImage(1, imgOptions2);
 		
-		var attachment = new Attachment("./img/" + imgPath[0]);
-		var attachment2 = new Attachment("./img/" + imgPath[1]);
+		if(process.platform === "win32"){
+			var attachment = new Attachment("./img/" + imgPath[0]);
+			var attachment2 = new Attachment("./img/" + imgPath[1]);
+		} else {
+			var attachment = new Attachment(imgPath[0]);
+			var attachment2 = new Attachment(imgPath[1]);
+		}
 		
 		await unpinMessages(guilds[ID].messagesToPin);
 		
