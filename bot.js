@@ -52,7 +52,7 @@ var gameUrls = ["",""];				// Indexes for games
 var gameTitles = ["",""];			// 0 = current game on offer
 var imgPath = ["",""];				// 1 = upcoming offer
 
-var imgDir = __dirname + "\\img\\";
+var imgDir = __dirname + "/img/";
 var switchMoment = "";
 var switchDate = "";
 
