@@ -1,18 +1,20 @@
 const fs = require('fs');
+const tokenJSON = require('./token.json');
+const token = tokenJSON.token;
 const moment = require('moment');
 moment().format();
 
 //Bot setup
 const {Client, Attachment} = require('discord.js');
 const bot = new Client();
-const token = fs.readFileSync('token.txt', 'utf8', function(err, data) {
+/*const token = fs.readFileSync('token.txt', 'utf8', function(err, data) {
 		if (err) throw err;
 		console.log(data);
 		return data;
-	});
+	});*/
 	
 var lastMoment;
-var alertHours = 84;
+var alertHours = 24;
 var cooldownTime = 600;				// 100ms per tick
 var clearTime = 60;					// 100ms per tick
 
