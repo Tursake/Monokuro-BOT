@@ -194,7 +194,11 @@ async function downloadImage(index, imgOptions){
 		
 		console.log('   -> Saved to', filename);
 		imgPath[index] = filename.substring(filename.lastIndexOf("\\") +1);
-		await resizeImage(imgDir + imgPath[index]);
+		if(process.platform === "win32"){
+			await resizeImage(imgDir + imgPath[index]);
+		} else {
+			await resizeImage(imgPath[index]);
+		}
 				
 	} else {
 		if(index == 0){
