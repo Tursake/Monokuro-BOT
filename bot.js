@@ -384,7 +384,6 @@ bot.on('guildDelete', function(guild){
 
 bot.on('message', msg=>{
 	if(msg.channel.type == "text"){
-		console.log(msg.content);
 		
 		msg.guild.fetchMember(msg.author).then(member => {
 			let isAdmin = msg.channel.permissionsFor(member).has("ADMINISTRATOR", true);
