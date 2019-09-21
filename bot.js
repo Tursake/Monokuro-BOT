@@ -384,16 +384,32 @@ bot.on('guildDelete', function(guild){
 
 bot.on('message', msg=>{
 	if(msg.channel.type == "text"){
-		let isAdmin = msg.channel.permissionsFor(msg.member).has("ADMINISTRATOR", true);
+		console.log(msg.content);
 		
-		if(msg.author.username != "Monokuro"){
-			/*if(msg.content === "!epic" && !guilds[msg.guild.id].operationRunning
-			&& msg.channel.name === guilds[msg.guild.id].setChannel){											// Used to manually fetch current and upcoming offers
-				if(guilds[msg.guild.id].onCooldown){
-					msg.react('❌');
-					console.log("Task rejected, another one is already running on the same server!");
-				} else {
-					msg.react('✅');
+		msg.guild.fetchMember(msg.author).then(member => {
+			let isAdmin = msg.channel.permissionsFor(member).has("ADMINISTRATOR", true);
+			
+			if(msg.author.username != "Monokuro"){
+				/*if(msg.content === "!epic" && !guilds[msg.guild.id].operationRunning
+				&& msg.channel.name === guilds[msg.guild.id].setChannel){											// Used to manually fetch current and upcoming offers
+					if(guilds[msg.guild.id].onCooldown){
+						msg.react('❌');
+						console.log("Task rejected, another one is already running on the same server!");
+					} else {
+						msg.react('✅');
+						sendInfo(msg.guild.id,msg.channel).then(result => {
+							console.log("Task done!");
+							guilds[msg.guild.id].operationRunning = result;
+							guilds[msg.guild.id].cooldown = cooldownTime;
+							guilds[msg.guild.id].systemMessageClearTimer = clearTime;
+							guilds[msg.guild.id].clearSystemMessages = true;
+							guilds[msg.guild.id].onCooldown = true;
+						})
+					}
+				} else*/ if (msg.content === "!set" && isAdmin && guilds[msg.guild.id] != msg.channel.name){			// Used to set desired channel for bot
+					guilds[msg.guild.id].setChannel = msg.channel.name;
+					msg.channel.send("Operating channel set to: **#" + guilds[msg.guild.id].setChannel + "**");
+					clearMessages(msg.guild.name);
 					sendInfo(msg.guild.id,msg.channel).then(result => {
 						console.log("Task done!");
 						guilds[msg.guild.id].operationRunning = result;
@@ -402,24 +418,12 @@ bot.on('message', msg=>{
 						guilds[msg.guild.id].clearSystemMessages = true;
 						guilds[msg.guild.id].onCooldown = true;
 					})
-				}
-			} else*/ if (msg.content === "!set" && isAdmin && guilds[msg.guild.id] != msg.channel.name){			// Used to set desired channel for bot
-				guilds[msg.guild.id].setChannel = msg.channel.name;
-				msg.channel.send("Operating channel set to: **#" + guilds[msg.guild.id].setChannel + "**");
-				clearMessages(msg.guild.name);
-				sendInfo(msg.guild.id,msg.channel).then(result => {
-					console.log("Task done!");
-					guilds[msg.guild.id].operationRunning = result;
-					guilds[msg.guild.id].cooldown = cooldownTime;
-					guilds[msg.guild.id].systemMessageClearTimer = clearTime;
-					guilds[msg.guild.id].clearSystemMessages = true;
-					guilds[msg.guild.id].onCooldown = true;
-				})
-			} /*else if(msg.content === "!epic"){
-				msg.react('❌');
-				console.log("Task rejected, another one is already running or operating channel not set by an admin!");
-			}*/
-		}
+				} /*else if(msg.content === "!epic"){
+					msg.react('❌');
+					console.log("Task rejected, another one is already running or operating channel not set by an admin!");
+				}*/
+			}
+		});
 	}
 });
 
