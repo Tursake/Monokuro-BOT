@@ -10,3 +10,7 @@ Automatically alerts specified channel 24 hours before the offerings change. Pin
 **How to use**:
 
 Add a `token.json` to the folder and paste your bot token into it in JSON format.
+
+**TO DO**:
+
+Update pinned date change message at least daily, instead of deleting existing pins and reposting info.
