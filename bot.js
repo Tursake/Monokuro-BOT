@@ -292,8 +292,8 @@ function alertUsers(){
 	for(var i = 0; i < Object.keys(guilds).length; i++){
 		if(guilds[Object.keys(guilds)[i]].alert == false && guilds[Object.keys(guilds)[i]].setChannel != ""){
 			let currGuild = bot.guilds.find(foundGuild => foundGuild.name === guilds[Object.keys(guilds)[i]].setGuild);
-			let channel = currGuild.channels.find(foundChan => foundChan.name === guilds[Object.keys(guilds)[i]].setChannel);
-			channel.send("ALERT! Game selection will change in" +
+			let currChannel = currGuild.channels.find(foundChan => foundChan.name === guilds[Object.keys(guilds)[i]].setChannel);
+			currChannel.send("ALERT! Game selection will change in" +
 			moment(switchDate).diff(moment(), 'hours') + " hours");
 		}
 	}
@@ -343,16 +343,20 @@ async function pollDate(){
 			if(lastMoment != null){
 				if(moment().dayOfYear() > lastMoment || (moment().dayOfYear() == 1 && lastMoment == 365)){
 					console.log("Date changed, updating info");
-					let currGuild = bot.guilds.find(foundGuild => foundGuild.name === guilds[Object.keys(guilds)[i]].setGuild);
-					let channel = currGuild.channels.find(foundChan => foundChan.name === guilds[Object.keys(guilds)[i]].setChannel);
-					sendInfo(guilds[Object.keys(guilds)[i]].setID,channel).then(result => {
-						console.log("Task done!");
-						guilds[Object.keys(guilds)[i]].operationRunning = result;
-						guilds[Object.keys(guilds)[i]].cooldown = cooldownTime;
-						guilds[Object.keys(guilds)[i]].systemMessageClearTimer = clearTime;
-						guilds[Object.keys(guilds)[i]].clearSystemMessages = true;
-						onCooldown = true;
-					})
+					let currGuild = bot.guilds.find(foundGuild =>
+					foundGuild.name === guilds[Object.keys(guilds)[i]].setGuild);
+					let channel = currGuild.channels.find(foundChan =>
+					foundChan.name === guilds[Object.keys(guilds)[i]].setChannel);
+					if(channel != null){																	//Only run if bot has actually been !set
+						sendInfo(guilds[Object.keys(guilds)[i]].setID,channel).then(result => {
+							console.log("Task done!");
+							guilds[Object.keys(guilds)[i]].operationRunning = result;
+							guilds[Object.keys(guilds)[i]].cooldown = cooldownTime;
+							guilds[Object.keys(guilds)[i]].systemMessageClearTimer = clearTime;
+							guilds[Object.keys(guilds)[i]].clearSystemMessages = true;
+							onCooldown = true;
+						})
+					}
 				}
 			}
 			
