@@ -288,7 +288,6 @@ function getSwitchDate(parsedBody){
 				promotions.upcomingPromotionalOffers[0].promotionalOffers[0].startDate);
 	switchDate = switchDate.substring(1,switchDate.length -2);
 	switchMoment = moment(switchDate).fromNow();
-	console.log(moment(switchDate).diff(moment(), 'hours'));
 }
 
 function alertUsers(){
