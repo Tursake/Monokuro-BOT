@@ -7,20 +7,15 @@ moment().format();
 //Bot setup
 const {Client, Attachment} = require('discord.js');
 const bot = new Client();
-/*const token = fs.readFileSync('token.txt', 'utf8', function(err, data) {
-		if (err) throw err;
-		console.log(data);
-		return data;
-	});*/
 	
 var lastMoment;
 var alertHours = 24;
-var cooldownTime = 600;				// 100ms per tick
-var clearTime = 60;					// 100ms per tick
+var cooldownTime = 600;													// 100ms per tick
+var clearTime = 60;														// 100ms per tick
 
 //Guild specifics
 var guilds = {};
-function guildsSetup(){
+function guildsSetup(){													// Checks which servers (guilds) bot is on and creates an object for them
 	console.log("Parsing bot guild list");
 	
 	bot.guilds.forEach((guild, index) => {
@@ -48,9 +43,9 @@ const cheerio = require('cheerio');
 const imgdownloader = require('image-downloader');
 const imgresize = require('sharp');
 
-var gameUrls = ["",""];				// Indexes for games
-var gameTitles = ["",""];			// 0 = current game on offer
-var imgPath = ["",""];				// 1 = upcoming offer
+var gameUrls = ["",""];													// Indexes for games
+var gameTitles = ["",""];												// 0 = current game on offer
+var imgPath = ["",""];													// 1 = upcoming offer
 
 var imgDir = __dirname + "/img/";
 var switchMoment = "";
@@ -66,16 +61,20 @@ const urlOptions = {
 	json:true
 };
 
-async function getInfo(){
+async function getInfo(){												// Gets the latest info from Epic Games Store
 	try{
 		const parsedBody = await rp(urlOptions);
 		
-		if(JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[0].title) != gameTitles[0]){
+		if(JSON.stringify(parsedBody.data
+			.Catalog.catalogOffers.elements[0].title)
+			!= gameTitles[0]){
 			clearImageFolder();
 		}
 		
-		gameTitles[0] = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[0].title);
-		gameTitles[1] = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[1].title);
+		gameTitles[0] = JSON.stringify(parsedBody.data
+						.Catalog.catalogOffers.elements[0].title);
+		gameTitles[1] = JSON.stringify(parsedBody.data
+						.Catalog.catalogOffers.elements[1].title);
 		gameUrls[0] = getUrlFromJSON(0, parsedBody);
 		gameUrls[1] = getUrlFromJSON(1, parsedBody);
 		
@@ -85,13 +84,12 @@ async function getInfo(){
 	}
 }
 
-async function sendInfo(ID, channel){
-	/*let processID = process.hrtime();
-	processID = Math.trunc((processID[0] + processID[1])/10000);*/
+async function sendInfo(ID, channel){									// Sends the latest info to specified channel
 	
 	if(!guilds[ID].operationRunning){
 		guilds[ID].operationRunning = true;
-		console.log("Task started for server: " + guilds[ID].setGuild + " - #" + guilds[ID].setChannel);
+		console.log("Task started for server: " +
+		guilds[ID].setGuild + " - #" + guilds[ID].setChannel);
 		
 		await getInfo();
 			
@@ -117,6 +115,7 @@ async function sendInfo(ID, channel){
 		}
 		
 		await unpinMessages(guilds[ID].messagesToPin);
+		let hours = moment(switchDate).diff(moment(), 'hours')%24;
 		
 		channel.send("The current free game on Epic Store is: **"
 		+ gameTitles[0] + "**", attachment)
@@ -129,7 +128,8 @@ async function sendInfo(ID, channel){
 			guilds[ID].messagesToPin[1] = toPin;
 		})
 		.then(() => channel.send("The next game will be available **"
-		+ switchMoment + "** (" + switchDate.substring(0,switchDate.indexOf("T")) + ")"))
+		+ switchMoment + " and " + hours + " hours** ("
+		+ switchDate.substring(0,switchDate.indexOf("T")) + ")"))
 		.then(toPin => {
 			guilds[ID].messagesToPin[2] = toPin;
 			pinMessages(guilds[ID].messagesToPin);
@@ -217,13 +217,15 @@ async function downloadImage(index, imgOptions){
 function getUrlFromJSON(index, parsedBody){
 	var urlFound = "";
 	var parsed = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[index].keyImages);
-	
 	var obj = JSON.parse(parsed);
 	var keys = Object.keys(obj);
 	for (var i = 0; i < keys.length; i++) {
 		var item = obj[keys[i]];
 		
-		urlFound = item.url;
+		if(item.type == "ComingSoon"){
+			urlFound = item.url;
+			break;
+		}
 	}
 	
 	return urlFound;
@@ -286,6 +288,7 @@ function getSwitchDate(parsedBody){
 				promotions.upcomingPromotionalOffers[0].promotionalOffers[0].startDate);
 	switchDate = switchDate.substring(1,switchDate.length -2);
 	switchMoment = moment(switchDate).fromNow();
+	console.log(moment(switchDate).diff(moment(), 'hours'));
 }
 
 function alertUsers(){
@@ -319,6 +322,9 @@ function deleteSystemMessages(guildName,channelName){
 }
 
 async function pollDate(){
+	
+	let dateChangedAlert = false;
+	
 	if(switchDate != "" && switchMoment != ""){
 		
 		for(var i = 0; i < Object.keys(guilds).length; i++){
@@ -326,7 +332,9 @@ async function pollDate(){
 				guilds[Object.keys(guilds)[i]].cooldown--;
 				if(guilds[Object.keys(guilds)[i]].cooldown <= 0){
 					guilds[Object.keys(guilds)[i]].onCooldown = false;
-					console.log("Cooldown finished for server: " + guilds[Object.keys(guilds)[i]].setGuild + " - #" + guilds[Object.keys(guilds)[i]].setChannel);
+					console.log("Cooldown finished for server: "
+					+ guilds[Object.keys(guilds)[i]].setGuild + " - #"
+					+ guilds[Object.keys(guilds)[i]].setChannel);
 				}
 			}
 			
@@ -342,26 +350,30 @@ async function pollDate(){
 			
 			if(lastMoment != null){
 				if(moment().dayOfYear() > lastMoment || (moment().dayOfYear() == 1 && lastMoment == 365)){
-					console.log("Date changed, updating info");
+					if(!dateChangedAlert)console.log("Date changed, updating info");
+					dateChangedAlert = true;
 					let currGuild = bot.guilds.find(foundGuild =>
 					foundGuild.name === guilds[Object.keys(guilds)[i]].setGuild);
 					let channel = currGuild.channels.find(foundChan =>
 					foundChan.name === guilds[Object.keys(guilds)[i]].setChannel);
 					if(channel != null){																	//Only run if bot has actually been !set
-						sendInfo(guilds[Object.keys(guilds)[i]].setID,channel).then(result => {
+						let hours = moment(switchDate).diff(moment(), 'hours')%24;
+						guilds[currGuild.id].messagesToPin[2].edit("The next game will be available **" + switchMoment + " and " + hours + " hours** (" + switchDate.substring(0,switchDate.indexOf("T")) + ")");
+						/*sendInfo(guilds[Object.keys(guilds)[i]].setID,channel).then(result => {
 							console.log("Task done!");
 							guilds[Object.keys(guilds)[i]].operationRunning = result;
 							guilds[Object.keys(guilds)[i]].cooldown = cooldownTime;
 							guilds[Object.keys(guilds)[i]].systemMessageClearTimer = clearTime;
 							guilds[Object.keys(guilds)[i]].clearSystemMessages = true;
 							onCooldown = true;
-						})
+						})*/
 					}
 				}
 			}
 			
-			lastMoment = moment().dayOfYear();
 		}
+		
+		lastMoment = moment().dayOfYear();
 		
 		if(moment(switchDate).diff(moment(), 'hours') < alertHours){
 			alertUsers();
@@ -388,7 +400,6 @@ bot.on('guildDelete', function(guild){
 
 bot.on('message', msg=>{
 	if(msg.channel.type == "text"){
-		
 		msg.guild.fetchMember(msg.author).then(member => {
 			let isAdmin = msg.channel.permissionsFor(member).has("ADMINISTRATOR", true);
 			
@@ -421,7 +432,9 @@ bot.on('message', msg=>{
 						guilds[msg.guild.id].clearSystemMessages = true;
 						guilds[msg.guild.id].onCooldown = true;
 					})
-				} /*else if(msg.content === "!epic"){
+				} /*else if (msg.content === "!test"){
+					lastMoment = 1;
+				}else if(msg.content === "!epic"){
 					msg.react('❌');
 					console.log("Task rejected, another one is already running or operating channel not set by an admin!");
 				}*/
