@@ -13,4 +13,4 @@ Add a `token.json` to the folder and paste your bot token into it in JSON format
 
 **TO DO**:
 
-Update pinned date change message at least daily, instead of deleting existing pins and reposting info.
+Let users subscribe to alert list!
