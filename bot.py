@@ -65,48 +65,23 @@ def guilds_setup():
 # Fetch info from Epic Games - simplified placeholder version
 async def get_info():
     global game_titles, game_urls, switch_date, switch_moment
-    url = "https://graphql.epicgames.com/graphql"
-    query = '''
-    query promotionsQuery($namespace: String!, $country: String!) {
-      Catalog {
-        catalogOffers(namespace: $namespace, params: {category: "freegames", country: $country, sortBy: "effectiveDate", sortDir: "asc"}) {
-          elements {
-            title
-            keyImages {
-              type
-              url
-            }
-            promotions {
-              promotionalOffers {
-                promotionalOffers {
-                  startDate
-                  endDate
-                }
-              }
-              upcomingPromotionalOffers {
-                promotionalOffers {
-                  startDate
-                  endDate
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    '''
-    variables = {"namespace": "epic", "country": "US"}
+    url = "https://store-site-backend-static-ipv4.ak.epicgames.com/freeGamesPromotions?locale=en-US&country=FI&allowCountries=FI"
 
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json={"query": query, "variables": variables}) as resp:
+        async with session.get(url) as resp:
             if resp.status != 200:
                 print(f"Error fetching info: {resp.status}")
                 return
             data = await resp.json()
 
-            elements = data["data"]["Catalog"]["catalogOffers"]["elements"]
-            # Titles
-            new_title_0 = elements[0]["title"]
+            elements = data.get("data", {}).get("Catalog", {}).get("searchStore", {}).get("elements", [])
+
+            if not elements:
+                print("No free games found in response.")
+                return
+
+            # Grab current free games (usually the first one or two)
+            new_title_0 = elements[0].get("title", "")
             if new_title_0 != game_titles[0]:
                 # Clear images if title changed (simplified)
                 for f in os.listdir(img_dir):
@@ -115,28 +90,35 @@ async def get_info():
             game_titles[0] = new_title_0
             game_titles[1] = elements[1]["title"] if len(elements) > 1 else ""
 
-            # URLs (look for ComingSoon type)
+            # Get images from keyImages with type "OfferImageWide" or fallback to first image url
             def get_url(index):
-                for img in elements[index]["keyImages"]:
-                    if img["type"] == "ComingSoon":
-                        return img["url"]
+                key_images = elements[index].get("keyImages", [])
+                for img in key_images:
+                    if img.get("type") == "OfferImageWide":
+                        return img.get("url", "")
+                if key_images:
+                    return key_images[0].get("url", "")
                 return ""
 
             game_urls[0] = get_url(0)
-            game_urls[1] = get_url(1)
+            game_urls[1] = get_url(1) if len(elements) > 1 else ""
 
-            # Switch date from upcoming promotional offers
+            # Find switch date from promotions, fallback if not found
+            switch_date = None
+            switch_moment = ""
             try:
-                switch_date = elements[1]["promotions"]["upcomingPromotionalOffers"][0]["promotionalOffers"][0]["startDate"]
-                dt = datetime.fromisoformat(switch_date.replace('Z', '+00:00'))
-                delta = dt - datetime.now(timezone.utc)
-                hours_left = int(delta.total_seconds() // 3600)
-                switch_moment = f"in {hours_left} hours"
+                promo = elements[1].get("promotions", {})
+                upcoming = promo.get("upcomingPromotionalOffers", [])
+                if upcoming and upcoming[0].get("promotionalOffers"):
+                    switch_date = upcoming[0]["promotionalOffers"][0]["startDate"]
+                    dt = datetime.fromisoformat(switch_date.replace('Z', '+00:00'))
+                    delta = dt - datetime.now(timezone.utc)
+                    hours_left = int(delta.total_seconds() // 3600)
+                    switch_moment = f"in {hours_left} hours"
             except Exception as e:
                 print(f"Error parsing switch date: {e}")
                 switch_date = None
                 switch_moment = ""
-
 async def send_info(guild_id, channel):
     if guilds[guild_id]["operationRunning"]:
         return
