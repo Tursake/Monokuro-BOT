@@ -1,383 +1,195 @@
-const fs = require('fs');
-const tokenJSON = require('./token.json');
-const token = tokenJSON.token;
-const moment = require('moment');
-moment().format();
 
-// Bot setup
-const { Client, MessageAttachment } = require('discord.js');
-const bot = new Client();
+import discord
+import aiohttp
+import asyncio
+import json
+import os
+from datetime import datetime, timezone
+from discord.ext import tasks, commands
 
-var lastMoment;
-var alertHours = 24;
-var cooldownTime = 600; // 100ms per tick
-var clearTime = 60;     // 100ms per tick
+# Load token from token.json
+with open("token.json", "r") as f:
+    data = json.load(f)
+    TOKEN = data["token"]
 
-// Guild specifics
-var guilds = {};
-function guildsSetup() {
-  console.log("Parsing bot guild list");
+intents = discord.Intents.default()
+intents.message_content = True
+intents.guilds = True
+intents.messages = True
 
-  bot.guilds.cache.forEach((guild) => {
-    if (!guilds[guild.id]) {
-      const curr = guild.id;
-      guilds[curr] = {};
-      guilds[curr].setChannel = "";
-      guilds[curr].setGuild = guild.name;
-      guilds[curr].setID = curr;
-      guilds[curr].messagesToPin = ["", "", ""];
-      guilds[curr].alerted = false;
-      guilds[curr].systemMessageClearTimer = 0;
-      guilds[curr].clearSystemMessages = false;
-      guilds[curr].cooldown = 0;
-      guilds[curr].onCooldown = false;
-      guilds[curr].operationRunning = false;
-      console.log(" -> Found server " + guilds[curr].setGuild);
-    }
-  });
-}
+bot = commands.Bot(command_prefix='!', intents=intents)
 
-// HTML scraping
-const rp = require('request-promise');
-const cheerio = require('cheerio');
-const imgdownloader = require('image-downloader');
-const imgresize = require('sharp');
+guilds = {}
 
-var gameUrls = ["", ""];     // Indexes for games
-var gameTitles = ["", ""];   // 0 = current game on offer
-var imgPath = ["", ""];      // 1 = upcoming offer
+alert_hours = 24
+cooldown_time = 60  # in seconds
+clear_time = 60  # seconds
 
-var imgDir = __dirname + "/img/";
-var switchMoment = "";
-var switchDate = "";
+img_dir = "./img/"
+if not os.path.exists(img_dir):
+    os.makedirs(img_dir)
 
-const urlOptions = {
-  method: "POST",
-  url: "https://graphql.epicgames.com/graphql",
-  body: {
-    "query": "\n          query promotionsQuery($namespace: String!, $country: String!) {\n            Catalog {\n              catalogOffers(namespace: $namespace, params: {category: \"freegames\", country: $country, sortBy: \"effectiveDate\", sortDir: \"asc\"}) {\n                elements {\n                  title\n                  keyImages {\n                    type\n                    url\n                  }\n                  promotions {\n                    promotionalOffers {\n                      promotionalOffers {\n                        startDate\n                        endDate\n                      }\n                    }\n                    upcomingPromotionalOffers {\n                      promotionalOffers {\n                        startDate\n                        endDate\n                      }\n                    }\n                  }\n                }\n              }\n            }\n          }\n        ",
-    "variables": { "namespace": "epic", "country": "US" }
-  },
-  json: true
-};
+# For simplicity, placeholders for game info
+game_titles = ["", ""]
+game_urls = ["", ""]
+switch_date = None
+switch_moment = ""
 
-async function getInfo() {
-  try {
-    const parsedBody = await rp(urlOptions);
+# Helper function to get current UTC ISO format time
+def iso_now():
+    return datetime.now(timezone.utc).isoformat()
 
-    if (JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[0].title) != gameTitles[0]) {
-      clearImageFolder();
-    }
+@bot.event
+async def on_ready():
+    print(f'Logged in as {bot.user}')
+    guilds_setup()
+    poll_date.start()  # start background task
 
-    gameTitles[0] = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[0].title);
-    gameTitles[1] = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[1].title);
-    gameUrls[0] = getUrlFromJSON(0, parsedBody);
-    gameUrls[1] = getUrlFromJSON(1, parsedBody);
-
-    getSwitchDate(parsedBody);
-  } catch (err) {
-    console.error(err);
-  }
-}
-
-async function sendInfo(ID, channel) {
-  if (!guilds[ID].operationRunning) {
-    guilds[ID].operationRunning = true;
-    console.log("Task started for server: " +
-      guilds[ID].setGuild + " - #" + guilds[ID].setChannel);
-
-    await getInfo();
-
-    const imgOptions1 = {
-      url: gameUrls[0],
-      dest: imgDir
-    };
-
-    const imgOptions2 = {
-      url: gameUrls[1],
-      dest: imgDir
-    };
-
-    await downloadImage(0, imgOptions1);
-    await downloadImage(1, imgOptions2);
-
-    let attachment = new MessageAttachment(imgDir + imgPath[0]);
-    let attachment2 = new MessageAttachment(imgDir + imgPath[1]);
-
-    await unpinMessages(guilds[ID].messagesToPin);
-
-    let hours = moment(switchDate).diff(moment(), 'hours') % 24;
-
-    channel.send("The current free game on Epic Store is: **"
-      + gameTitles[0] + "**", attachment)
-      .then(toPin => {
-        guilds[ID].messagesToPin[0] = toPin;
-      })
-      .then(() => channel.send("The next free game is: **" + gameTitles[1]
-        + "**", attachment2))
-      .then(toPin => {
-        guilds[ID].messagesToPin[1] = toPin;
-      })
-      .then(() => channel.send("The next game will be available **"
-        + switchMoment + " and " + hours + " hours** ("
-        + switchDate.substring(0, switchDate.indexOf("T")) + ")"))
-      .then(toPin => {
-        guilds[ID].messagesToPin[2] = toPin;
-        pinMessages(guilds[ID].messagesToPin);
-      })
-      .catch(error => {
-        console.error(error);
-      });
-
-    return false;
-  }
-}
-
-function pinMessages(messages) {
-  for (var i = messages.length - 1; i >= 0; i--) {
-    if (messages[i] !== "") {
-      messages[i].pin();
-    }
-  }
-}
-
-function unpinMessages(messages) {
-  for (var i = 0; i < messages.length; i++) {
-    if (messages[i] !== "") {
-      messages[i].unpin();
-    }
-  }
-}
-
-function clearMessages(guildName) {
-  let currGuild = bot.guilds.cache.find(foundGuild => foundGuild.name === guildName);
-  if (!currGuild) return;
-  let channels = currGuild.channels.cache.filter(chan => chan.type === "text");
-  channels.forEach(channel => {
-    channel.messages.fetchPinned()
-      .then(messages => {
-        const botMessages = messages.filter(msg => msg.author.username === bot.user.username);
-        channel.bulkDelete(botMessages, true).catch(console.error);
-      });
-  });
-}
-
-async function downloadImage(index, imgOptions) {
-  if (gameUrls[index].substring(gameUrls[index].lastIndexOf("/") + 1) !== imgPath[index]) {
-
-    if (index === 0) {
-      console.log(" -> Downloading/replacing image for CURRENT OFFER");
-    } else if (index === 1) {
-      console.log(" -> Downloading/replacing image for UPCOMING OFFER");
-    }
-
-    let filenameObj = await imgdownloader.image(imgOptions);
-    let filename = filenameObj.filename;
-
-    console.log('   -> Saved to', filename);
-    imgPath[index] = filename.substring(filename.lastIndexOf("\\") + 1);
-    if (process.platform === "win32") {
-      await resizeImage(imgDir + imgPath[index]);
-    } else {
-      await resizeImage(imgPath[index]);
-    }
-
-  } else {
-    if (index === 0) {
-      console.log(" -> Correct image for CURRENT OFFER already exists!");
-    } else if (index === 1) {
-      console.log(" -> Correct image for UPCOMING OFFER already exists!");
-    }
-  }
-}
-
-function getUrlFromJSON(index, parsedBody) {
-  var urlFound = "";
-  var parsed = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[index].keyImages);
-  var obj = JSON.parse(parsed);
-  var keys = Object.keys(obj);
-  for (var i = 0; i < keys.length; i++) {
-    var item = obj[keys[i]];
-
-    if (item.type === "ComingSoon") {
-      urlFound = item.url;
-      break;
-    }
-  }
-
-  return urlFound;
-}
-
-function clearImageFolder() {
-  console.log("Clearing image folder");
-
-  fs.readdir(imgDir, (err, files) => {
-    if (err) throw err;
-
-    let count = 0;
-
-    for (let file of files) {
-      if (file !== ".gitkeep") {
-        let path = imgDir + file;
-        fs.unlink(path, err => {
-          if (err) throw err;
-        });
-        count++;
-      }
-    }
-
-    if (count > 0) {
-      console.log(" -> Deleted (" + count + ") files");
-    } else {
-      console.log(" -> Folder was already empty");
-    }
-  });
-}
-
-async function resizeImage(filePath) {
-  console.log("    -> Resizing from path: " + filePath);
-  imgresize.cache(false);
-  try {
-    await imgresize(filePath).resize(350).toBuffer().then(buffer => {
-      fs.writeFileSync(filePath, buffer);
-      console.log("     -> File resized!");
-    });
-  } catch (err) {
-    console.error(err);
-  }
-}
-
-function getSwitchDate(parsedBody) {
-  switchDate = JSON.stringify(parsedBody.data.Catalog.catalogOffers.elements[1].
-    promotions.upcomingPromotionalOffers[0].promotionalOffers[0].startDate);
-  switchDate = switchDate.substring(1, switchDate.length - 2);
-  switchMoment = moment(switchDate).fromNow();
-}
-
-function alertUsers() {
-  for (var i = 0; i < Object.keys(guilds).length; i++) {
-    if (!guilds[Object.keys(guilds)[i]].alerted && guilds[Object.keys(guilds)[i]].setChannel !== "") {
-      let currGuild = bot.guilds.cache.find(foundGuild => foundGuild.name === guilds[Object.keys(guilds)[i]].setGuild);
-      if (!currGuild) continue;
-      let currChannel = currGuild.channels.cache.find(foundChan => foundChan.name === guilds[Object.keys(guilds)[i]].setChannel);
-      if (!currChannel) continue;
-      currChannel.send("ALERT! Game selection will change in " +
-        moment(switchDate).diff(moment(), 'hours') + " hours");
-      guilds[Object.keys(guilds)[i]].alerted = true;
-    }
-  }
-}
-
-function resetAlerts() {
-  for (var i = 0; i < Object.keys(guilds).length; i++) {
-    guilds[Object.keys(guilds)[i]].alerted = false;
-  }
-}
-
-function deleteSystemMessages(guildName, channelName) {
-  console.log("Deleting pin messages from server: " + guildName + " - #" + channelName);
-
-  let currGuild = bot.guilds.cache.find(foundGuild => foundGuild.name === guildName);
-  if (!currGuild) return;
-  let channel = currGuild.channels.cache.find(foundChan => foundChan.name === channelName);
-  if (!channel) return;
-
-  channel.messages.fetch({ limit: 10 })
-    .then(messages => {
-      const systemMessages = messages.filter(msg => msg.system);
-      channel.bulkDelete(systemMessages, true).catch(console.error);
-    });
-}
-
-async function pollDate() {
-
-  let dateChangedAlert = false;
-
-  if (switchDate !== "" && switchMoment !== "") {
-
-    for (var i = 0; i < Object.keys(guilds).length; i++) {
-      let guildKey = Object.keys(guilds)[i];
-      if (guilds[guildKey].onCooldown) {
-        guilds[guildKey].cooldown--;
-        if (guilds[guildKey].cooldown <= 0) {
-          guilds[guildKey].onCooldown = false;
-          console.log("Cooldown finished for server: "
-            + guilds[guildKey].setGuild + " - #"
-            + guilds[guildKey].setChannel);
-        }
-      }
-
-      if (guilds[guildKey].clearSystemMessages) {
-        guilds[guildKey].systemMessageClearTimer--;
-        if (guilds[guildKey].systemMessageClearTimer <= 0) {
-          guilds[guildKey].clearSystemMessages = false;
-          if (guilds[guildKey].setChannel !== "") {
-            deleteSystemMessages(guilds[guildKey].setGuild, guilds[guildKey].setChannel);
-          }
-        }
-      }
-
-      if (lastMoment != null) {
-        if (moment().dayOfYear() > lastMoment || (moment().dayOfYear() === 1 && lastMoment === 365)) {
-          if (!dateChangedAlert) console.log("Date changed, updating info");
-          dateChangedAlert = true;
-          let currGuild = bot.guilds.cache.find(foundGuild =>
-            foundGuild.name === guilds[guildKey].setGuild);
-          if (!currGuild) continue;
-          let channel = currGuild.channels.cache.find(foundChan =>
-            foundChan.name === guilds[guildKey].setChannel);
-          if (channel != null) {  // Only run if bot has actually been !set
-            let hours = moment(switchDate).diff(moment(), 'hours') % 24;
-            if (guilds[currGuild.id] && guilds[currGuild.id].messagesToPin[2]) {
-              guilds[currGuild.id].messagesToPin[2].edit("The next game will be available **" + switchMoment + " and " + hours + " hours** (" + switchDate.substring(0, switchDate.indexOf("T")) + ")");
+def guilds_setup():
+    print("Parsing bot guild list")
+    for guild in bot.guilds:
+        if guild.id not in guilds:
+            guilds[guild.id] = {
+                "setChannel": None,
+                "setGuild": guild.name,
+                "messagesToPin": [None, None, None],
+                "alerted": False,
+                "operationRunning": False,
+                "cooldown": 0,
+                "onCooldown": False,
+                "clearSystemMessages": False,
+                "systemMessageClearTimer": 0,
             }
-            /* Uncomment if you want to auto-send info on date change
-            sendInfo(guilds[guildKey].setID, channel).then(result => {
-              console.log("Task done!");
-              guilds[guildKey].operationRunning = result;
-              guilds[guildKey].cooldown = cooldownTime;
-              guilds[guildKey].systemMessageClearTimer = clearTime;
-              guilds[guildKey].clearSystemMessages = true;
-              guilds[guildKey].onCooldown = true;
-            });
-            */
+            print(f" -> Found server {guild.name}")
+
+# Fetch info from Epic Games - simplified placeholder version
+async def get_info():
+    global game_titles, game_urls, switch_date, switch_moment
+    url = "https://graphql.epicgames.com/graphql"
+    query = '''
+    query promotionsQuery($namespace: String!, $country: String!) {
+      Catalog {
+        catalogOffers(namespace: $namespace, params: {category: "freegames", country: $country, sortBy: "effectiveDate", sortDir: "asc"}) {
+          elements {
+            title
+            keyImages {
+              type
+              url
+            }
+            promotions {
+              promotionalOffers {
+                promotionalOffers {
+                  startDate
+                  endDate
+                }
+              }
+              upcomingPromotionalOffers {
+                promotionalOffers {
+                  startDate
+                  endDate
+                }
+              }
+            }
           }
         }
       }
-
     }
+    '''
+    variables = {"namespace": "epic", "country": "US"}
 
-    lastMoment = moment().dayOfYear();
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json={"query": query, "variables": variables}) as resp:
+            if resp.status != 200:
+                print(f"Error fetching info: {resp.status}")
+                return
+            data = await resp.json()
 
-    if (moment(switchDate).diff(moment(), 'hours') < alertHours) {
-      alertUsers();
-    } else if (moment(switchDate).diff(moment(), 'days') < 0) {
-      resetAlerts();
-    }
-  }
-}
+            elements = data["data"]["Catalog"]["catalogOffers"]["elements"]
+            # Titles
+            new_title_0 = elements[0]["title"]
+            if new_title_0 != game_titles[0]:
+                # Clear images if title changed (simplified)
+                for f in os.listdir(img_dir):
+                    if f != ".gitkeep":
+                        os.remove(os.path.join(img_dir, f))
+            game_titles[0] = new_title_0
+            game_titles[1] = elements[1]["title"] if len(elements) > 1 else ""
 
-bot.on('ready', () => {
-  console.log("Bot online!");
-  guildsSetup();
-});
+            # URLs (look for ComingSoon type)
+            def get_url(index):
+                for img in elements[index]["keyImages"]:
+                    if img["type"] == "ComingSoon":
+                        return img["url"]
+                return ""
 
-bot.on('guildCreate', (guild) => {
-  console.log("New guild joined: " + guild.name);
-  guildsSetup();
-});
+            game_urls[0] = get_url(0)
+            game_urls[1] = get_url(1)
 
-bot.on('message', async (message) => {
-  if (message.author.bot) return;
+            # Switch date from upcoming promotional offers
+            try:
+                switch_date = elements[1]["promotions"]["upcomingPromotionalOffers"][0]["promotionalOffers"][0]["startDate"]
+                dt = datetime.fromisoformat(switch_date.replace('Z', '+00:00'))
+                delta = dt - datetime.now(timezone.utc)
+                hours_left = int(delta.total_seconds() // 3600)
+                switch_moment = f"in {hours_left} hours"
+            except Exception as e:
+                print(f"Error parsing switch date: {e}")
+                switch_date = None
+                switch_moment = ""
 
-  if (message.content === "!set") {
-    let guildID = message.guild.id;
-    guilds[guildID].setChannel = message.channel.name;
-    await message.channel.send("Operating channel set to: **#" + message.channel.name + "**");
-    sendInfo(guildID, message.channel);
-  }
-});
+async def send_info(guild_id, channel):
+    if guilds[guild_id]["operationRunning"]:
+        return
 
-bot.login(token);
+    guilds[guild_id]["operationRunning"] = True
+    print(f"Task started for server: {guilds[guild_id]['setGuild']} - #{guilds[guild_id]['setChannel']}")
 
-setInterval(pollDate, 100);
+    await get_info()
+
+    # Send messages with current and upcoming offers
+    try:
+        msg1 = await channel.send(f"The current free game on Epic Store is: **{game_titles[0]}**")
+        msg2 = await channel.send(f"The next free game is: **{game_titles[1]}**")
+        msg3 = await channel.send(f"The next game will be available **{switch_moment}** ({switch_date[:10] if switch_date else 'N/A'})")
+
+        guilds[guild_id]["messagesToPin"] = [msg1, msg2, msg3]
+
+        for msg in guilds[guild_id]["messagesToPin"]:
+            if msg:
+                await msg.pin()
+    except Exception as e:
+        print(f"Error sending info messages: {e}")
+
+    guilds[guild_id]["operationRunning"] = False
+
+@bot.event
+async def on_guild_join(guild):
+    print(f"New guild joined: {guild.name}")
+    guilds_setup()
+
+@bot.command(name="set")
+@commands.has_permissions(administrator=True)
+async def set_channel(ctx):
+    guild_id = ctx.guild.id
+    guilds[guild_id]["setChannel"] = ctx.channel.name
+    await ctx.send(f"Operating channel set to: **#{ctx.channel.name}**")
+    await send_info(guild_id, ctx.channel)
+
+@tasks.loop(seconds=60)
+async def poll_date():
+    # Check if alert is needed
+    now = datetime.now(timezone.utc)
+    if switch_date:
+        dt = datetime.fromisoformat(switch_date.replace('Z', '+00:00'))
+        delta = dt - now
+        if delta.total_seconds() < alert_hours * 3600:
+            for guild_id in guilds:
+                if not guilds[guild_id]["alerted"] and guilds[guild_id]["setChannel"]:
+                    guild = bot.get_guild(guild_id)
+                    if guild:
+                        channel = discord.utils.get(guild.text_channels, name=guilds[guild_id]["setChannel"])
+                        if channel:
+                            await channel.send(f"ALERT! Game selection will change in {int(delta.total_seconds() // 3600)} hours")
+                            guilds[guild_id]["alerted"] = True
+
+bot.run(TOKEN)
