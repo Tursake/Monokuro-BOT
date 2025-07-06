@@ -7,6 +7,16 @@ import os
 from datetime import datetime, timezone
 from discord.ext import tasks, commands
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+import requests
+from bs4 import BeautifulSoup
+import re
+
+DATA_FILE = "seen_pelit.json"
+DISCOUNTS_BASE_URL = "https://hintavahti.mika.moe/discounts"
+HEADERS = {
+    "User-Agent": "MonokuroBOT/1.0 (Varastan vain vähän dataa discobotille t. Tursake :3c)"
+}
 
 # Load token from token.json
 with open("token.json", "r") as f:
@@ -347,6 +357,169 @@ async def clear_bot_pins(channel):
                 await msg.unpin()
             except Exception as e:
                 print(f"Failed to unpin message: {e}")
+                
+def load_seen():
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            # Convert list of lists back into set of tuples
+            return set(tuple(item) for item in json.load(f))
+    return set()
+
+def save_seen(items):
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        # Convert set of tuples into list of lists for JSON serialization
+        json.dump([list(item) for item in items], f, ensure_ascii=False, indent=2)
+
+def scrape_pelit():
+    pelit = set()
+    page = 1
+
+    while True:
+        url = f"{DISCOUNTS_BASE_URL}?page={page}"
+        print(f"Fetching page {page}: {url}")
+        response = requests.get(url, headers=HEADERS)
+        if response.status_code == 404:
+            print("Reached end of pages, stopping.")
+            break
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        table = soup.find("table")
+        if not table:
+            break
+        else:
+            headers = [th.text.strip() for th in table.find_all("th")]
+            try:
+                name_idx = headers.index("Nimike")
+                price_idx = headers.index("Hinta")
+            except ValueError:
+                print("Required columns not found, stopping.")
+                break
+
+        rows = table.find_all("tr")[1:]  # skip header row
+        if not rows:
+            print("No rows found, stopping.")
+            break
+        else:
+            print(f"Found {len(rows)} rows.")
+
+        new_pelit_this_page = 0
+        for row in rows:
+            cols = row.find_all("td")
+            if len(cols) <= max(name_idx, price_idx):
+                print("Row skipped due to insufficient columns.")
+                continue
+
+            product_cell = cols[name_idx]
+            raw_name = product_cell.get_text(strip=True)
+
+            # Check if "peli" is in product name (case insensitive)
+            if "peli" not in raw_name.lower():
+                continue
+
+            # Extract discount (e.g. "-22%") from "Alennus:" text (optional whitespace after colon)
+            discount_match = re.search(r'Alennus:\s*(-\d+%)', raw_name)
+            discount = discount_match.group(1) if discount_match else None
+
+            # Clean product name by removing " -peli" suffix and discount text
+            clean_name = re.sub(r'-peli', '', raw_name, flags=re.IGNORECASE)
+            clean_name = re.sub(r'\s*Alennus:\s*-\d+%', '', clean_name).strip()
+
+            # Get product URL if available
+            product_link_tag = product_cell.find("a")
+            product_url = (
+                f"https://hintavahti.mika.moe{product_link_tag['href']}"
+                if product_link_tag and product_link_tag.has_attr("href")
+                else None
+            )
+
+            price = cols[price_idx].get_text(strip=True)
+
+            pelit.add((clean_name, product_url, price, discount))
+            new_pelit_this_page += 1
+
+        print(f"New pelit found this page: {new_pelit_this_page}")
+        if new_pelit_this_page == 0:
+            print("No new pelit this page, stopping.")
+            break
+
+        page += 1
+
+    print(f"Total pelit found: {len(pelit)}")
+    return pelit
+
+async def scrape_task(bot):
+    await bot.wait_until_ready()
+    loop = asyncio.get_running_loop()  # better for async context
+    executor = ThreadPoolExecutor()
+
+    seen = load_seen()
+    print(f"Loaded {len(seen)} previously seen discounts.")
+
+    first_run = True
+    test_guild_id = 615637443680665613  # Your test server ID
+
+    while not bot.is_closed():
+        try:
+            pelit = await loop.run_in_executor(executor, scrape_pelit)
+            new_pelit = pelit - seen
+
+            guild_data = guilds.get(test_guild_id)
+            if new_pelit and guild_data:
+                channel_id = guild_data.get("setChannel")
+                if channel_id:
+                    channel = bot.get_channel(channel_id)
+                    if channel:
+                        try:
+                            if first_run:
+                                await channel.send(
+                                    "Initializing deal finder using https://hintavahti.mika.moe/discounts as source!\n"
+                                    "Deal finder runs daily and informs of new sale items."
+                                )
+                            elif len(new_pelit) > 10:
+                                await channel.send(
+                                    "**Several new discounts found!**\n"
+                                    "More than 10 new deals detected. Check the full list here:\n"
+                                    "https://hintavahti.mika.moe/discounts"
+                                )
+                            else:
+                                lines = []
+                                for name, url, price, discount in sorted(new_pelit):
+                                    name_link = f"[{name}]({url})" if url else name
+                                    if discount:
+                                        lines.append(f"• {name_link} — {price} ({discount})")
+                                    else:
+                                        lines.append(f"• {name_link} — {price}")
+                                message = "**New deals found!**\n" + "\n".join(lines)
+                                await channel.send(message, suppress_embeds=True)
+
+                            print(f"Posted new discounts to guild {test_guild_id} channel {channel_id}")
+
+                            # Mark first run as done after successful message
+                            if first_run:
+                                first_run = False
+
+                        except Exception as e:
+                            print(f"Failed to send message to guild {test_guild_id} channel {channel_id}: {e}")
+                    else:
+                        print(f"Channel {channel_id} not found in guild {test_guild_id}")
+                else:
+                    print(f"No setChannel found for guild {test_guild_id}")
+            else:
+                if not new_pelit:
+                    print(f"[{datetime.now()}] No new discounts found.")
+                elif not guild_data:
+                    print(f"No guild data found for guild {test_guild_id}")
+
+            if new_pelit:
+                seen.update(new_pelit)
+                save_seen(seen)
+                print(f"[{datetime.now()}] Processed {len(new_pelit)} new discount(s).")
+
+        except Exception as e:
+            print(f"Error during scraping task: {e}")
+
+        await asyncio.sleep(24 * 60 * 60)  # Run once every 24 hours
 
 @bot.event
 async def on_guild_join(guild):
@@ -357,8 +530,9 @@ async def on_guild_join(guild):
 @bot.command(name="set")
 @commands.has_permissions(administrator=True)
 async def set_channel(ctx):
+    await ctx.typing()
     guild_id = ctx.guild.id
-
+    
     # Initialize full guild dict if missing for consistent structure
     if guild_id not in guilds:
         guilds[guild_id] = {
@@ -408,12 +582,13 @@ async def poll_date():
         # Calculate hours until switch moment (hardcoded switch at 5 AM UTC)
         switch_hour = 5
         switch_time = now.replace(hour=switch_hour, minute=0, second=0, microsecond=0)
+
         if now.hour < switch_hour:
             # If before switch hour, switch time is today at 5 AM
             pass
         else:
-            # If after or equal to switch hour, next switch is tomorrow 5 AM
-            switch_time = switch_time.replace(day=now.day + 1)
+            # If after or equal to switch hour, next switch is tomorrow 5 AM (safe rollover)
+            switch_time = switch_time + timedelta(days=1)
 
         time_until_switch = (switch_time - now).total_seconds() / 3600
 
@@ -430,5 +605,46 @@ async def poll_date():
         if time_until_switch <= 0:
             guild_data["alerted"] = False
 
+"""@bot.command(name="runscrape")
+@commands.has_permissions(administrator=True)
+async def run_scrape(ctx):
+    await ctx.send("Running scraper manually...")
+    loop = asyncio.get_event_loop()
+    executor = ThreadPoolExecutor()
+
+    try:
+        pelit = await loop.run_in_executor(executor, scrape_pelit)
+        seen = load_seen()
+        new_pelit = pelit - seen
+
+        if not seen:
+            await ctx.send("First run: no message posted to avoid spam.")
+        elif len(new_pelit) > 10:
+            await ctx.send("More than 10 new discounts found, see them all here: https://hintavahti.mika.moe/discounts")
+        elif new_pelit:
+            lines = []
+            for name, url, price, discount in sorted(new_pelit):
+                name_link = f"[{name}]({url})" if url else name
+                if discount:
+                    lines.append(f"• {name_link} — {price} ({discount})")
+                else:
+                    lines.append(f"• {name_link} — {price}")
+            message = "**New discounts!**\n" + "\n".join(lines)
+            await ctx.send(message, suppress_embeds=True)
+        else:
+            await ctx.send("No new discounts found.")
+
+        seen.update(new_pelit)
+        save_seen(seen)
+
+    except Exception as e:
+        await ctx.send(f"Error running scraper: {e}")"""
+
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    if not hasattr(bot, "scraper_started"):
+        bot.scraper_started = True
+        bot.loop.create_task(scrape_task(bot))
 
 bot.run(TOKEN)
