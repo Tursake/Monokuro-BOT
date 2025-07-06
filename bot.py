@@ -605,7 +605,7 @@ async def poll_date():
         if time_until_switch <= 0:
             guild_data["alerted"] = False
 
-"""@bot.command(name="runscrape")
+@bot.command(name="runscrape")
 @commands.has_permissions(administrator=True)
 async def run_scrape(ctx):
     await ctx.send("Running scraper manually...")
@@ -638,7 +638,7 @@ async def run_scrape(ctx):
         save_seen(seen)
 
     except Exception as e:
-        await ctx.send(f"Error running scraper: {e}")"""
+        await ctx.send(f"Error running scraper: {e}")
 
 @bot.event
 async def on_ready():
