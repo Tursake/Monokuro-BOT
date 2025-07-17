@@ -62,6 +62,39 @@ def compute_info_hash(info):
     summary_str = json.dumps(summary, sort_keys=True)
     return hashlib.sha256(summary_str.encode()).hexdigest()
 
+SETTINGS_FILE = "guild_settings.json"
+
+def save_guild_settings():
+    to_save = {
+        str(gid): {
+            "setChannel": data["setChannel"],
+            "setGuild": data["setGuild"]
+        }
+        for gid, data in guilds.items()
+        if data["setChannel"] is not None
+    }
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(to_save, f, indent=2)
+
+def load_guild_settings():
+    if os.path.exists(SETTINGS_FILE):
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        for gid_str, entry in data.items():
+            gid = int(gid_str)
+            guilds[gid] = {
+                "setChannel": entry["setChannel"],
+                "setGuild": entry.get("setGuild", "Unknown"),
+                "messagesToPin": [],
+                "alerted": False,
+                "operationRunning": False,
+                "cooldown": 0,
+                "onCooldown": False,
+                "clearSystemMessages": False,
+                "systemMessageClearTimer": 0
+            }
+
+
 def guilds_setup():
     print("Parsing bot guild list")
     for guild in bot.guilds:
@@ -521,8 +554,7 @@ async def on_guild_join(guild):
 async def set_channel(ctx):
     await ctx.typing()
     guild_id = ctx.guild.id
-    
-    # Initialize full guild dict if missing for consistent structure
+
     if guild_id not in guilds:
         guilds[guild_id] = {
             "setChannel": None,
@@ -533,19 +565,17 @@ async def set_channel(ctx):
             "cooldown": 0,
             "onCooldown": False,
             "clearSystemMessages": False,
-            "systemMessageClearTimer": 0,
+            "systemMessageClearTimer": 0
         }
 
     guilds[guild_id]["setChannel"] = ctx.channel.id
+    guilds[guild_id]["setGuild"] = ctx.guild.name  # Update name too
+
+    save_guild_settings()  # <== ✅ ADD THIS LINE
+
     await ctx.send(f"Channel set to {ctx.channel.mention}, initiating")
-
-    # Clear all pins created by the bot in this channel before sending new info
     await clear_bot_pins(ctx.channel)
-
-    # Fetch the free games info
     info = await get_info()
-
-    # Send new info and pin the messages
     await send_info(info, ctx.channel, guild_id)
 
 
@@ -632,8 +662,11 @@ async def run_scrape(ctx):
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+
+    load_guild_settings()
     guilds_setup()
-    poll_date.start()  # start background task
+
+    poll_date.start()
     if not hasattr(bot, "scraper_started"):
         bot.scraper_started = True
         bot.loop.create_task(scrape_task(bot))
