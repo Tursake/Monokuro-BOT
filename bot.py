@@ -444,71 +444,66 @@ def scrape_pelit():
 
 async def scrape_task(bot):
     await bot.wait_until_ready()
-    loop = asyncio.get_running_loop()  # better for async context
+    loop = asyncio.get_running_loop()
     executor = ThreadPoolExecutor()
 
     seen = load_seen()
     print(f"Loaded {len(seen)} previously seen discounts.")
 
     first_run = True
-    test_guild_id = 615637443680665613  # Your test server ID
 
     while not bot.is_closed():
         try:
             pelit = await loop.run_in_executor(executor, scrape_pelit)
             new_pelit = pelit - seen
 
-            guild_data = guilds.get(test_guild_id)
-            if new_pelit and guild_data:
+            for guild_id, guild_data in guilds.items():
                 channel_id = guild_data.get("setChannel")
-                if channel_id:
-                    channel = bot.get_channel(channel_id)
-                    if channel:
-                        try:
-                            if first_run:
-                                await channel.send(
-                                    "Initializing deal finder using https://hintavahti.mika.moe/discounts as source!\n"
-                                    "Deal finder runs daily and informs of new sale items."
-                                )
-                            elif len(new_pelit) > 10:
-                                await channel.send(
-                                    "**Several new discounts found!**\n"
-                                    "More than 10 new deals detected. Check the full list here:\n"
-                                    "https://hintavahti.mika.moe/discounts"
-                                )
-                            else:
-                                lines = []
-                                for name, url, price, discount in sorted(new_pelit):
-                                    name_link = f"[{name}]({url})" if url else name
-                                    if discount:
-                                        lines.append(f"• {name_link} — {price} ({discount})")
-                                    else:
-                                        lines.append(f"• {name_link} — {price}")
-                                message = "**New deals found!**\n" + "\n".join(lines)
-                                await channel.send(message, suppress_embeds=True)
+                if not channel_id:
+                    print(f"Guild {guild_id} has no setChannel.")
+                    continue
 
-                            print(f"Posted new discounts to guild {test_guild_id} channel {channel_id}")
+                channel = bot.get_channel(channel_id)
+                if not channel:
+                    print(f"Channel {channel_id} not found for guild {guild_id}.")
+                    continue
 
-                            # Mark first run as done after successful message
-                            if first_run:
-                                first_run = False
+                try:
+                    if new_pelit:
+                        if first_run:
+                            await channel.send(
+                                "Initializing deal finder using https://hintavahti.mika.moe/discounts as source!\n"
+                                "Deal finder runs daily and informs of new sale items."
+                            )
+                        elif len(new_pelit) > 10:
+                            await channel.send(
+                                "**Several new discounts found!**\n"
+                                "More than 10 new deals detected. Check the full list here:\n"
+                                "https://hintavahti.mika.moe/discounts"
+                            )
+                        else:
+                            lines = []
+                            for name, url, price, discount in sorted(new_pelit):
+                                name_link = f"[{name}]({url})" if url else name
+                                if discount:
+                                    lines.append(f"• {name_link} — {price} ({discount})")
+                                else:
+                                    lines.append(f"• {name_link} — {price}")
+                            message = "**New deals found!**\n" + "\n".join(lines)
+                            await channel.send(message, suppress_embeds=True)
 
-                        except Exception as e:
-                            print(f"Failed to send message to guild {test_guild_id} channel {channel_id}: {e}")
-                    else:
-                        print(f"Channel {channel_id} not found in guild {test_guild_id}")
-                else:
-                    print(f"No setChannel found for guild {test_guild_id}")
-            else:
-                if not new_pelit:
-                    print(f"[{datetime.now()}] No new discounts found.")
-                elif not guild_data:
-                    print(f"No guild data found for guild {test_guild_id}")
+                        print(f"Posted {len(new_pelit)} new discounts to guild {guild_data['setGuild']}")
+
+                except Exception as e:
+                    print(f"Failed to send new_pelit message to guild {guild_data['setGuild']}: {e}")
 
             if new_pelit:
                 seen.update(new_pelit)
                 save_seen(seen)
                 print(f"[{datetime.now()}] Processed {len(new_pelit)} new discount(s).")
+
+            if first_run:
+                first_run = False
 
         except Exception as e:
             print(f"Error during scraping task: {e}")
