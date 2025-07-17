@@ -62,12 +62,6 @@ def compute_info_hash(info):
     summary_str = json.dumps(summary, sort_keys=True)
     return hashlib.sha256(summary_str.encode()).hexdigest()
 
-@bot.event
-async def on_ready():
-    print(f'Logged in as {bot.user}')
-    guilds_setup()
-    poll_date.start()  # start background task
-
 def guilds_setup():
     print("Parsing bot guild list")
     for guild in bot.guilds:
@@ -579,8 +573,8 @@ async def poll_date():
                 guild_data["onCooldown"] = False
             continue
 
-        # Calculate hours until switch moment (hardcoded switch at 5 AM UTC)
-        switch_hour = 5
+        # Calculate hours until switch moment
+        switch_hour = 17
         switch_time = now.replace(hour=switch_hour, minute=0, second=0, microsecond=0)
 
         if now.hour < switch_hour:
@@ -643,6 +637,8 @@ async def run_scrape(ctx):
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    guilds_setup()
+    poll_date.start()  # start background task
     if not hasattr(bot, "scraper_started"):
         bot.scraper_started = True
         bot.loop.create_task(scrape_task(bot))
