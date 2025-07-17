@@ -508,7 +508,8 @@ async def scrape_task(bot):
                                 "Initializing deal finder using https://hintavahti.mika.moe/discounts as source!\n"
                                 "Deal finder runs daily and informs of new sale items."
                             )
-                        elif len(new_pelit) > 10:
+				
+                        if len(new_pelit) > 10:
                             await channel.send(
                                 "**Several new discounts found!**\n"
                                 "More than 10 new deals detected. Check the full list here:\n"
